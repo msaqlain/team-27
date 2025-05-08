@@ -1,0 +1,9 @@
+# add node_modules
+node_modules
+
+# add .venv
+.venv
+
+# add .dapr
+.dapr
+

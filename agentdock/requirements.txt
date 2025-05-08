@@ -1,0 +1,23 @@
+# FastAPI Backend Dependencies
+fastapi==0.109.2
+uvicorn==0.27.1
+pydantic==2.11.3  # Matching dapr-agents requirement
+pydantic-settings==2.2.1  # Added for settings management
+python-dotenv==1.0.1
+sqlalchemy==2.0.27
+alembic==1.13.1
+pytest==8.0.0
+httpx==0.26.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.9
+
+# Dapr Dependencies
+dapr-agents==0.5.1
+requests==2.31.0
+
+# Development Dependencies
+black==24.1.1
+flake8==7.0.0
+isort==5.13.2
+mypy==1.8.0

@@ -1,0 +1,35 @@
+# https://docs.dapr.io/developing-applications/local-development/multi-app-dapr-run/multi-app-template/#template-properties
+version: 1
+common:
+  resourcesPath: ./components
+  logLevel: info
+  appLogDestination: console
+  daprdLogDestination: console
+
+apps:
+- appID: BackendApp
+  appDirPath: ./backend
+  command: ["python3", "run.py"]
+  appPort: 8000
+
+# - appID: JiraApp
+#   appDirPath: ./mcp_servers/jira/
+#   command: ["python3", "app.py"]
+
+# - appID: SlackApp
+#   appDirPath: ./mcp_servers/slack/
+#   command: ["python3", "app.py"]
+
+# - appID: GithubApp
+#   appDirPath: ./mcp_servers/github/
+#   command: ["python3", "app.py"]
+
+# - appID: OrchestratorApp
+#   appDirPath: ./workflows/orchestrator/
+#   command: ["python3", "app.py"]
+#   appPort: 8004
+
+# - appID: FrontendApp
+#   appDirPath: ./frontend
+#   command: ["npm", "start"]
+#   appPort: 3000
