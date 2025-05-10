@@ -9,24 +9,36 @@ common:
 apps:
 - appID: BackendApp
   appDirPath: ./backend
-  command: ["python3", "run.py"]
+  command: ["python", "run.py"]
   appPort: 8000
+  env:
+    GROQ_API_KEY: "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"
+    GITHUB_MCP_URL: "http://localhost:8001"
 
 - appID: JiraApp
   appDirPath: ./mcp_servers/jira/
-  command: ["python3", "app.py"]
+  command: ["python", "app.py"]
 
 - appID: SlackApp
   appDirPath: ./mcp_servers/slack/
-  command: ["python3", "app.py"]
+  command: ["python", "app.py"]
 
 - appID: GithubApp
   appDirPath: ./mcp_servers/github/
-  command: ["python3", "app.py"]
+  command: ["python", "app.py"]
+  appPort: 8001
+
+- appID: ChatbotApp
+  appDirPath: ./chatbot
+  command: ["python", "app.py"]
+  appPort: 8002
+  env:
+    GROQ_API_KEY: "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"
+    GITHUB_MCP_URL: "http://localhost:8001"
 
 - appID: OrchestratorApp
   appDirPath: ./workflows/orchestrator/
-  command: ["python3", "app.py"]
+  command: ["python", "app.py"]
   appPort: 8004
 
 - appID: FrontendApp
