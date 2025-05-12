@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Ports
     BACKEND_PORT: str = "8000"
     GITHUB_MCP_PORT: str = "8001"
+    SLACK_MCP_PORT: str = "8002"
+    JIRA_MCP_PORT: str = "8003"
     FRONTEND_PORT: str = "3000"
 
     class Config:

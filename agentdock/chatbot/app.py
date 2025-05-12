@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import logging
 from groq import Groq
+from langchain_service import LangChainService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +32,9 @@ if not groq_api_key:
 
 logger.info("Initializing Groq client...")
 client = Groq(api_key=groq_api_key)
+
+# Initialize LangChain service
+langchain_service = LangChainService(groq_api_key)
 
 class ChatMessage(BaseModel):
     message: str
@@ -703,88 +707,121 @@ async def handle_cross_platform_action(github_result: Dict, slack_params: Dict, 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(message: ChatMessage):
-    """Process natural language message and interact with GitHub and/or Slack"""
+    """Process chat message and return response with MCP analysis"""
     try:
-        logger.info(f"Received chat message: {message.message}")
+        # Determine intent
+        intent = await langchain_service.determine_intent(message.message)
         
-        # Get MCP URLs from context if provided
-        context = message.context or {}
-        github_mcp_url = context.get("github_mcp_url", GITHUB_MCP_BASE_URL)
-        slack_mcp_url = context.get("slack_mcp_url", SLACK_MCP_BASE_URL)
+        # Initialize analyses dictionary
+        analyses = {}
         
-        logger.info(f"Using GitHub MCP URL: {github_mcp_url}")
-        logger.info(f"Using Slack MCP URL: {slack_mcp_url}")
-        
-        # Determine intent (GitHub, Slack, or both)
-        intent = determine_intent(message.message)
-        platform = intent.get("platform", "conversation")
-        
-        logger.info(f"Determined platform: {platform}")
-        
-        # Handle general conversation
-        if platform == "conversation":
-            return ChatResponse(
-                response="Hello! I'm your assistant. I can help you with:\n"
-                        "• GitHub: View repositories, check pull requests, get repository statistics\n"
-                        "• Slack: List channels, send messages, get conversation history\n"
-                        "• Cross-platform: Send GitHub information to Slack channels\n\n"
-                        "Just let me know what you'd like to do!",
-                action_taken={"action": "conversation"}
-            )
-        
-        # Handle GitHub-only requests
-        elif platform == "github":
-            result = await handle_github_request(intent, github_mcp_url)
-            return ChatResponse(
-                response=result["response"],
-                action_taken=result["action_taken"]
-            )
-        
-        # Handle Slack-only requests
-        elif platform == "slack":
-            result = await handle_slack_request(intent, slack_mcp_url)
-            return ChatResponse(
-                response=result["response"],
-                action_taken=result["action_taken"]
-            )
-        
-        # Handle cross-platform requests (both GitHub and Slack)
-        elif platform == "both":
-            # First handle the GitHub part
-            github_result = await handle_github_request(intent, github_mcp_url)
+        # Process based on intent
+        if intent["platform"] in ["github", "both"]:
+            # Handle GitHub request
+            github_result = await handle_github_request(intent, GITHUB_MCP_BASE_URL)
+            if github_result.get("raw_data"):
+                analyses["GitHub"] = await langchain_service.analyze_mcp_data("GitHub", github_result["raw_data"])
             
-            # Then handle the Slack part
-            if "slack_action" in intent and intent["slack_action"] == "send_message":
-                # If the intent is to send GitHub data to Slack
-                cross_platform_result = await handle_cross_platform_action(github_result, intent, slack_mcp_url)
-                return ChatResponse(
-                    response=cross_platform_result["response"],
-                    action_taken=cross_platform_result["action_taken"]
-                )
-            else:
-                # Handle each part separately and combine the results
-                slack_result = await handle_slack_request(intent, slack_mcp_url)
-                combined_response = f"{github_result['response']}\n\n{slack_result['response']}"
-                return ChatResponse(
-                    response=combined_response,
-                    action_taken={
-                        "github": github_result["action_taken"],
-                        "slack": slack_result["action_taken"]
-                    }
-                )
+            # If it's a cross-platform action, handle Slack part
+            if intent["platform"] == "both" and intent.get("slack_action"):
+                slack_result = await handle_cross_platform_action(github_result, intent, SLACK_MCP_BASE_URL)
+                if slack_result.get("action_taken", {}).get("result"):
+                    analyses["Slack"] = await langchain_service.analyze_mcp_data("Slack", slack_result["action_taken"]["result"])
         
-        else:
-            return ChatResponse(
-                response="I'm not sure what you're asking for. Could you please clarify if you need help with GitHub, Slack, or both?",
-                action_taken=None
-            )
+        elif intent["platform"] == "slack":
+            # Handle Slack request
+            slack_result = await handle_slack_request(intent, SLACK_MCP_BASE_URL)
+            if slack_result.get("action_taken", {}).get("result"):
+                analyses["Slack"] = await langchain_service.analyze_mcp_data("Slack", slack_result["action_taken"]["result"])
+        
+        elif intent["platform"] in ["jira", "both"]:
+            # Handle Jira request
+            jira_result = await handle_jira_request(intent, JIRA_MCP_BASE_URL)
+            if jira_result.get("raw_data"):
+                analyses["Jira"] = await langchain_service.analyze_mcp_data("Jira", jira_result["raw_data"])
             
-    except Exception as e:
-        logger.error(f"Error in chat endpoint: {str(e)}")
+            # If it's a cross-platform action, handle other parts
+            if intent["platform"] == "both":
+                if intent.get("github_action"):
+                    github_result = await handle_github_request(intent, GITHUB_MCP_BASE_URL)
+                    if github_result.get("raw_data"):
+                        analyses["GitHub"] = await langchain_service.analyze_mcp_data("GitHub", github_result["raw_data"])
+                
+                if intent.get("slack_action"):
+                    slack_result = await handle_slack_request(intent, SLACK_MCP_BASE_URL)
+                    if slack_result.get("action_taken", {}).get("result"):
+                        analyses["Slack"] = await langchain_service.analyze_mcp_data("Slack", slack_result["action_taken"]["result"])
+        
+        # Generate response using LangChain
+        response = await langchain_service.generate_response(message.message, analyses)
+        
         return ChatResponse(
-            response=f"Sorry, I encountered an error: {str(e)}",
-            action_taken=None
+            response=response,
+            action_taken={
+                "intent": intent,
+                "analyses": analyses
+            }
         )
+    except Exception as e:
+        logger.error(f"Error processing chat message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def handle_jira_request(params: Dict, jira_mcp_url: str) -> Dict:
+    """Handle Jira-related requests"""
+    action = params.get("jira_action")
+    project = params.get("project")
+    issue_key = params.get("issue_key")
+    sprint = params.get("sprint")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            if action == "list_issues":
+                response = await client.get(f"{jira_mcp_url}/issues", params={"project": project})
+                response.raise_for_status()
+                result = response.json()
+                return {
+                    "response": f"Found {len(result)} issues in project {project}",
+                    "raw_data": result
+                }
+            
+            elif action == "get_issue_details" and issue_key:
+                response = await client.get(f"{jira_mcp_url}/issues/{issue_key}")
+                response.raise_for_status()
+                result = response.json()
+                return {
+                    "response": f"Details for issue {issue_key}",
+                    "raw_data": result
+                }
+            
+            elif action == "get_sprint_status" and sprint:
+                response = await client.get(f"{jira_mcp_url}/sprints/{sprint}/status")
+                response.raise_for_status()
+                result = response.json()
+                return {
+                    "response": f"Status for sprint {sprint}",
+                    "raw_data": result
+                }
+            
+            elif action == "get_team_velocity":
+                response = await client.get(f"{jira_mcp_url}/velocity")
+                response.raise_for_status()
+                result = response.json()
+                return {
+                    "response": "Team velocity metrics",
+                    "raw_data": result
+                }
+            
+            else:
+                return {
+                    "response": "I need more information about which Jira action you want to perform.",
+                    "raw_data": None
+                }
+    except Exception as e:
+        logger.error(f"Error handling Jira request: {str(e)}")
+        return {
+            "response": f"Error handling Jira request: {str(e)}",
+            "raw_data": None
+        }
 
 if __name__ == "__main__":
     import uvicorn
