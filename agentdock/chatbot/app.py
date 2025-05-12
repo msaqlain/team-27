@@ -211,7 +211,7 @@ def determine_intent(message: str) -> Dict:
         2. "confidence": A number between 0 and 1 indicating your confidence
         
         If platform is "github" or "both", include these fields for GitHub:
-        - github_action: one of [list_prs, get_pr_summary, get_stats, get_repo_info, list_my_repos]
+        - github_action: one of [list_prs, get_pr_summary, get_stats, create_pr, list_my_repos]
         - owner: repository owner (if mentioned)
         - repo: repository name (if mentioned)
         - pr_number: pull request number (if mentioned)
@@ -221,6 +221,10 @@ def determine_intent(message: str) -> Dict:
         - channel: channel name or ID (if mentioned)
         - message_content: content of message to send (if applicable)
         - time_range: time range for history (if applicable)
+        - pr_title: pull request title (if mentioned)
+        - pr_body: pull request body (if mentioned)
+        - pr_head: pull request head (if mentioned)
+        - pr_base: pull request base branch (if mentioned)
         
         Return ONLY the JSON object, no other text.
         """
@@ -264,6 +268,12 @@ def determine_intent(message: str) -> Dict:
     except Exception as e:
         logger.error(f"Error in determine_intent: {str(e)}")
         return {"platform": "conversation"}
+    
+class CreatePRRequest(BaseModel):
+    title: str
+    body: str
+    head: str
+    base: str = "main"
 
 async def handle_github_request(params: Dict) -> Dict:
     """Handle GitHub-related requests"""
@@ -271,42 +281,64 @@ async def handle_github_request(params: Dict) -> Dict:
     owner = params.get("owner")
     repo = params.get("repo")
     pr_number = params.get("pr_number")
+    pr_title = params.get("pr_title")
+    pr_body = params.get("pr_body")
+    pr_head = params.get("pr_head")
+    pr_base = params.get("pr_base")
     
     # Handle list_my_repos action
     if action == "list_my_repos":
         try:
-            # Get user's repositories
-            result = await call_github_api("user/repos", use_token=True)
+        # Use async context manager for the HTTP client
+            async with httpx.AsyncClient() as client:
+                # Print for debugging
+                print("Attempting to fetch repositories...")
+                
+                # Make the GET request
+                response = await client.get(f"{GITHUB_MCP_BASE_URL}/repos")
+                
+                # Check if the response was successful
+                response.raise_for_status()
+                
+                # Parse JSON response
+                result = response.json()
+                
+                # Print raw result for debugging
+                print(f"Received {len(result)} repositories")
+                
+                # Format the repositories
+                repos = []
+                for repo_data in result:
+                    # Safely extract repository information with default values
+                    repos.append({
+                        "name": repo_data.get("name", "Unknown Repository"),
+                        "description": repo_data.get("description", "No description"),
+                        "url": repo_data.get("html_url", ""),
+                        "private": repo_data.get("private", False),
+                        "stars": repo_data.get("stargazers_count", 0),
+                        "forks": repo_data.get("forks_count", 0)
+                    })
             
-            # Format the response
-            repos = []
-            for repo_data in result:
-                repos.append({
-                    "name": repo_data["name"],
-                    "description": repo_data["description"],
-                    "url": repo_data["html_url"],
-                    "private": repo_data["private"],
-                    "stars": repo_data["stargazers_count"],
-                    "forks": repo_data["forks_count"]
-                })
+            # Handle empty repository list
+                if not repos:
+                    return {
+                        "response": "You don't have any repositories yet.",
+                        "action_taken": {"action": "list_my_repos", "result": []}
+                    }
             
-            if not repos:
+            # Format response with repository details
                 return {
-                    "response": "You don't have any repositories yet.",
-                    "action_taken": {"action": "list_my_repos", "result": []}
+                    "response": "Here are your repositories:\n" + "\n".join([
+                        f"• {r['name']} ({'Private' if r['private'] else 'Public'}) - {r['description']}\n"
+                        f"  Stars: {r['stars']}, Forks: {r['forks']}\n"
+                        f"  URL: {r['url']}"
+                        for r in repos
+                    ]),
+                    "action_taken": {"action": "list_my_repos", "result": repos}
                 }
-            
-            return {
-                "response": f"Here are your repositories:\n" + "\n".join([
-                    f"• {r['name']} ({'Private' if r['private'] else 'Public'}) - {r['description'] or 'No description'}\n"
-                    f"  Stars: {r['stars']}, Forks: {r['forks']}\n"
-                    f"  URL: {r['url']}"
-                    for r in repos
-                ]),
-                "action_taken": {"action": "list_my_repos", "result": repos}
-            }
         except Exception as e:
-            logger.error(f"Error listing repositories: {str(e)}")
+            # Catch-all for any other unexpected errors
+            logging.error(f"Unexpected error listing repositories: {str(e)}")
             return {
                 "response": "To access your repositories, you need to configure GitHub first. Please use:\n\n"
                         "POST http://localhost:8001/configure\n"
@@ -339,83 +371,95 @@ async def handle_github_request(params: Dict) -> Dict:
     
     # Map actions to GitHub API endpoints
     if action == "list_prs":
-        result = await call_github_api(f"repos/{owner}/{repo}/pulls", use_token=not is_public)
-        if not result:
+        # result = await call_github_api(f"repos/{owner}/{repo}/pulls", use_token=not is_public)
+        async with httpx.AsyncClient() as client:
+            # First try to get the configuration
+            response = await client.get(f"{GITHUB_MCP_BASE_URL}/{owner}/{repo}/prs")
+            response.raise_for_status()
+            result = response.json()
+            if not result:
+                return {
+                    "response": f"No open pull requests found for {owner}/{repo}.",
+                    "action_taken": {"action": "list_prs", "result": []}
+                }
+        
+            pr_list = "\n".join([
+                f"• #{pr['number']} - {pr['title']} by {pr['user']['login']}\n"
+                f"  Status: {pr['state']}, Created: {pr['created_at']}\n"
+                f"  URL: {pr['html_url']}"
+                for pr in result
+            ])
+        
             return {
-                "response": f"No open pull requests found for {owner}/{repo}.",
-                "action_taken": {"action": "list_prs", "result": []}
+                "response": f"Here are the pull requests for {owner}/{repo}:\n\n{pr_list}",
+                "action_taken": {"action": "list_prs", "result": result},
+                "raw_data": result  # Store the raw data for potential cross-platform actions
             }
         
-        pr_list = "\n".join([
-            f"• #{pr['number']} - {pr['title']} by {pr['user']['login']}\n"
-            f"  Status: {pr['state']}, Created: {pr['created_at']}\n"
-            f"  URL: {pr['html_url']}"
-            for pr in result
-        ])
-        
-        return {
-            "response": f"Here are the pull requests for {owner}/{repo}:\n\n{pr_list}",
-            "action_taken": {"action": "list_prs", "result": result},
-            "raw_data": result  # Store the raw data for potential cross-platform actions
-        }
-        
     elif action == "get_pr_summary" and pr_number:
-        result = await call_github_api(f"repos/{owner}/{repo}/pulls/{pr_number}", use_token=not is_public)
+        # result = await call_github_api(f"repos/{owner}/{repo}/pulls/{pr_number}", use_token=not is_public)
+        async with httpx.AsyncClient() as client:
+            # First try to get the configuration
+            response = await client.get(f"{GITHUB_MCP_BASE_URL}/{owner}{repo}/prs/{pr_number}/summary")
+            response.raise_for_status()
+            result = response.json()
         
         # Format PR summary
-        pr_summary = (
-            f"PR #{pr_number}: {result['title']}\n"
-            f"Author: {result['user']['login']}\n"
-            f"Status: {result['state'].upper()}\n"
-            f"Created: {result['created_at']}\n"
-            f"Description: {result['body'] or 'No description provided'}\n"
-            f"URL: {result['html_url']}"
-        )
+            pr_summary = (
+                f"PR #{pr_number}: {result['title']}\n"
+                f"Author: {result['user']['login']}\n"
+                f"Status: {result['state'].upper()}\n"
+                f"Created: {result['created_at']}\n"
+                f"Description: {result['body'] or 'No description provided'}\n"
+                f"URL: {result['html_url']}"
+            )
         
-        return {
-            "response": f"Here's the summary of PR #{pr_number} in {owner}/{repo}:\n\n{pr_summary}",
-            "action_taken": {"action": "get_pr_summary", "result": result},
-            "raw_data": result  # Store the raw data for potential cross-platform actions
-        }
-        
+            return {
+                "response": f"Here's the summary of PR #{pr_number} in {owner}/{repo}:\n\n{pr_summary}",
+                "action_taken": {"action": "get_pr_summary", "result": result},
+                "raw_data": result  # Store the raw data for potential cross-platform actions
+            }
+            
     elif action == "get_stats":
-        result = await call_github_api(f"repos/{owner}/{repo}", use_token=not is_public)
+        async with httpx.AsyncClient() as client:
+            # First try to get the configuration
+            response = await client.get(f"{GITHUB_MCP_BASE_URL}/{owner}/{repo}/stats")
+            response.raise_for_status()
+            result = response.json()
         
         # Format repo stats
-        repo_stats = (
-            f"Repository: {result['full_name']}\n"
-            f"Description: {result['description'] or 'No description'}\n"
-            f"Stars: {result['stargazers_count']}\n"
-            f"Forks: {result['forks_count']}\n"
-            f"Open Issues: {result['open_issues_count']}\n"
-            f"Default Branch: {result['default_branch']}\n"
-            f"License: {result.get('license', {}).get('name', 'None')}\n"
-            f"Created: {result['created_at']}\n"
-            f"Last Updated: {result['updated_at']}\n"
-            f"URL: {result['html_url']}"
-        )
+            repo_stats = (
+                f"Repository: {result['full_name']}\n"
+                f"Description: {result['description'] or 'No description'}\n"
+                f"Stars: {result['stargazers_count']}\n"
+                f"Forks: {result['forks_count']}\n"
+                f"Open Issues: {result['open_issues_count']}\n"
+                f"Default Branch: {result['default_branch']}\n"
+                f"License: {result.get('license', {}).get('name', 'None')}\n"
+                f"Created: {result['created_at']}\n"
+                f"Last Updated: {result['updated_at']}\n"
+                f"URL: {result['html_url']}"
+            )
+        
+            return {
+                "response": f"Here are the statistics for {owner}/{repo}:\n\n{repo_stats}",
+                "action_taken": {"action": "get_stats", "result": result}
+            }
+        
+    elif action == "create_pr":
+        async with httpx.AsyncClient() as client:
+            # First try to get the configuration
+            body = CreatePRRequest(
+                title=pr_title,
+                body=pr_body,
+                head=pr_head,
+                base=pr_base
+            )
+            result = await client.post(f"{GITHUB_MCP_BASE_URL}/{owner}/{repo}/pr/create",
+                json=body.dict())
         
         return {
-            "response": f"Here are the statistics for {owner}/{repo}:\n\n{repo_stats}",
-            "action_taken": {"action": "get_stats", "result": result}
-        }
-        
-    elif action == "get_repo_info":
-        result = await call_github_api(f"repos/{owner}/{repo}", use_token=not is_public)
-        
-        # Format repo info
-        repo_info = (
-            f"Repository: {result['full_name']}\n"
-            f"Description: {result['description'] or 'No description'}\n"
-            f"Language: {result.get('language', 'Not specified')}\n"
-            f"Visibility: {'Private' if result.get('private', True) else 'Public'}\n"
-            f"Stars: {result['stargazers_count']}\n"
-            f"Forks: {result['forks_count']}\n"
-            f"URL: {result['html_url']}"
-        )
-        
-        return {
-            "response": f"Here's information about {owner}/{repo}:\n\n{repo_info}",
+            "response": f"PR created",
             "action_taken": {"action": "get_repo_info", "result": result}
         }
         

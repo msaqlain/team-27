@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button } from '@mui/material';
 import { useSnackbar } from 'notistack';
 import axios from 'axios';
@@ -16,6 +16,19 @@ const GitHubTokenModal = ({ open, onClose }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
 
+  useEffect(() => {
+    handleSlackSubmit()
+  },[])
+
+  const handleSlackSubmit = async () => {
+    try {
+      const slackToken = "xoxb-8903182592848-8884517421220-Y13IGtV5qRSaxi9SjbogytFv"
+      await axios.post("http://localhost:8003/configure", { token: slackToken });
+    }
+    catch (err) {
+      console.log(err)
+    }
+  };
   const handleSubmit = async () => {
     if (!githubToken.trim()) {
       enqueueSnackbar('Please enter a GitHub token', { variant: 'error' });

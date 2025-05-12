@@ -10,7 +10,7 @@ app = FastAPI(title="GitHub MCP Server")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_origins=["http://localhost:8002", "http://localhost:3000"],  # React dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,25 +72,45 @@ async def get_config():
 
 @app.get("/repos")
 async def list_repositories():
-    """List all repositories the user has access to"""
-    if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub not configured")
+    """
+    List all repositories the user has access to
     
+    Raises:
+    - HTTPException: If GitHub is not configured or if repository fetch fails
+    """
+    # Validate GitHub token
+    if not github_token:
+        raise HTTPException(
+            status_code=400, 
+            detail="GitHub token not configured. Please set GITHUB_TOKEN environment variable."
+        )
+    
+    # Prepare headers for GitHub API request
     headers = {
         "Authorization": f"token {github_token}",
         "Accept": "application/vnd.github.v3+json"
     }
     
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://api.github.com/user/repos",
-            headers=headers
+    try:
+        # Make async request to GitHub API
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                headers=headers
+            )
+            
+            # Check for successful response
+            response.raise_for_status()  # Raises HTTPError for bad responses
+            
+            # Return repository data
+            return response.json()
+    except Exception as e:
+        # Catch-all for other potential errors
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Unexpected error fetching repositories: {str(e)}"
         )
-        
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Failed to fetch repositories")
-        
-        return response.json()
+
 
 @app.get("/{owner}/{repo}/prs")
 async def list_prs(owner: str, repo: str):
@@ -109,8 +129,7 @@ async def list_prs(owner: str, repo: str):
             headers=headers
         )
         
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Failed to fetch PRs")
+        response.raise_for_status()
         
         return response.json()
 
@@ -131,18 +150,9 @@ async def get_pr_summary(owner: str, repo: str, pr_number: int):
             headers=headers
         )
         
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Failed to fetch PR")
+        response.raise_for_status()
         
-        pr_data = response.json()
-        return PRSummary(
-            pr_number=pr_data["number"],
-            title=pr_data["title"],
-            description=pr_data["body"],
-            status=pr_data["state"],
-            created_at=datetime.strptime(pr_data["created_at"], "%Y-%m-%dT%H:%M:%SZ"),
-            updated_at=datetime.strptime(pr_data["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
-        )
+        return response.json()
 
 @app.post("/{owner}/{repo}/sync")
 async def sync_repo(owner: str, repo: str, branch: str = "main"):
@@ -190,7 +200,7 @@ async def create_pr(owner: str, repo: str, pr_request: CreatePRRequest):
         "Authorization": f"token {github_token}",
         "Accept": "application/vnd.github.v3+json"
     }
-    
+    print(pr_request)
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"https://api.github.com/repos/{owner}/{repo}/pulls",
@@ -202,9 +212,8 @@ async def create_pr(owner: str, repo: str, pr_request: CreatePRRequest):
                 "base": pr_request.base
             }
         )
-        
-        if response.status_code != 201:
-            raise HTTPException(status_code=response.status_code, detail="Failed to create PR")
+        print("damn", response)
+        response.raise_for_status()
         
         return response.json()
 
@@ -225,19 +234,9 @@ async def get_repo_stats(owner: str, repo: str):
             headers=headers
         )
         
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Failed to fetch repository stats")
+        response.raise_for_status()
         
-        repo_data = response.json()
-        return RepoStats(
-            stars=repo_data["stargazers_count"],
-            forks=repo_data["forks_count"],
-            open_issues=repo_data["open_issues_count"],
-            watchers=repo_data["watchers_count"],
-            language=repo_data["language"],
-            description=repo_data["description"],
-            last_updated=datetime.strptime(repo_data["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
-        )
+        return response.json()
 
 if __name__ == "__main__":
     import uvicorn
