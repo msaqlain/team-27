@@ -19,7 +19,7 @@ apps:
 - appID: JiraApp
   appDirPath: ./mcp_servers/jira/
   command: ["python", "app.py"]
-
+  
 - appID: SlackApp
   appDirPath: ./mcp_servers/slack/
   command: ["python", "app.py"]
