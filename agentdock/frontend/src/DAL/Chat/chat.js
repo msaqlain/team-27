@@ -32,7 +32,6 @@ export async function* DoChat(message, chatHistory = []) {
 
     // Parse the JSON response
     const data = await response.json();
-    console.log(data)
     // Get the assistant's response
     const assistantResponse = data.response;
     
@@ -63,6 +62,12 @@ export async function* DoChat(message, chatHistory = []) {
             formattedResult = formatRepoInfo(data.action_taken.result);
             break;
           case 'list_my_repos':
+            break;
+          case 'send_message':
+            yield ""
+            break;
+          case 'cross_platform':
+            yield ""
             break;
           default:
             formattedResult = JSON.stringify(data.action_taken.result, null, 2);

@@ -145,7 +145,7 @@ export default function ChatWithAgent() {
         sx={{ position: "absolute", top: 16, right: 16 }}
         onClick={() => navigate("/agent-configuration")}
       >
-        Configure GitHub Access
+        Configure Agent Access
       </Button>
       <div className="flex h-full" style={{ paddingLeft: "20px", paddingRight: "20px" }}>
         <div className={mainDashboard ? '' : 'w-1/5 pl-4'}>
