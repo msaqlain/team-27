@@ -1,18 +1,20 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSnackbar } from "notistack";
 import { ArrowUpIcon, PlusIcon, SparklesIcon } from "../components/icons.tsx";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@mui/material";
 import { DoChat } from "../DAL/Chat/chat.js";
 
 import './ChatWithAgent.css'
 
 export default function ChatWithAgent() {
+  const navigate = useNavigate();
   const containerRef = useRef(null);
   const { enqueueSnackbar } = useSnackbar();
   const [mainDashboard, setMainDashboard] = useState(true);
 
   const [input, setInput] = useState("");
   const [openLoader, setOpenLoader] = useState(false);
-  const [streamingResponse, setStreamingResponse] = useState("");
   const [chatScreenHeight, setChatScreenHeight] = useState("30vh");
 
   const conversations = {
@@ -29,7 +31,6 @@ export default function ChatWithAgent() {
     return html.replace(/(\d+\.)\s+(\S)/g, '$1 $2');
   };
   
-
   // Scroll to the bottom of the chat container
   const setScroll = () => {
     if (containerRef.current) {
@@ -48,6 +49,7 @@ export default function ChatWithAgent() {
     if (!input.trim()) return; // Prevent sending empty messages
     setMainDashboard(false);
     setChatScreenHeight("78vh");
+    
     // Create a deepcopy of the current messages
     const currentMessages = [...messages];
     
@@ -70,33 +72,45 @@ export default function ChatWithAgent() {
       const stream = DoChat(input, lastThreeMessages);
       let aiReply = "";
 
-      setMessages([
-        ...currentMessages,
-        { user: input, assistant: "Searching..." },
-      ]);
+      setMessages(prev => {
+        const updated = [...prev];
+        // Replace the "Thinking..." with "Searching..."
+        if (updated.length > 0) {
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            assistant: "Searching..."
+          };
+        }
+        return updated;
+      });
+
+      let previousChunk = "";
 
       for await (const chunk of stream) {
-        aiReply += chunk;
+        const newText = chunk.slice(previousChunk.length); // only get the new part
+        previousChunk = chunk;
 
-        aiReply = aiReply.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        const formattedChunk = newText.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
         setMessages(prev => {
           const updated = [...prev];
-          const lastMessage = updated[updated.length - 1];
-
-          // Update assistant message only
-          updated[updated.length - 1] = {
-            ...lastMessage,
-            assistant: aiReply.replace(/(?<!\d)\. /g, '.\n').replace("? ", "?\n"),
-          };
-
+          if (updated.length > 0) {
+            const currentAssistantMessage = updated[updated.length - 1].assistant || "";
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              assistant: (currentAssistantMessage + formattedChunk)
+                .replace(/(?<!\d)\. /g, '.\n')
+                .replace("? ", "?\n"),
+            };
+          }
           return updated;
         });
 
         setTimeout(() => {
           setScroll();
-        }, 200); // reduce lag, lower timeout
+        }, 200);
       }
+      
 
       setOpenLoader(false);
 
@@ -125,6 +139,14 @@ export default function ChatWithAgent() {
 
   return (
     <div className="flex flex-col h-screen bg-white-100 chat-container">
+      <Button
+        variant="contained"
+        color="primary"
+        sx={{ position: "absolute", top: 16, right: 16 }}
+        onClick={() => navigate("/agent-configuration")}
+      >
+        Configure GitHub Access
+      </Button>
       <div className="flex h-full" style={{ paddingLeft: "20px", paddingRight: "20px" }}>
         <div className={mainDashboard ? '' : 'w-1/5 pl-4'}>
           <div
