@@ -4,6 +4,8 @@ import { ArrowUpIcon, PlusIcon, SparklesIcon, ChevronLeftIcon, ChevronRightIcon 
 import { useNavigate } from "react-router-dom";
 import { Button } from "@mui/material";
 import { DoChat } from "../DAL/Chat/chat.js";
+import { CHAT_WITH_AGENT_SCREEN_HEIGHT } from "../constants/AppConstants.js";
+import GitHubTokenModal from "../components/GitHubTokenModal";
 
 import './ChatWithAgent.css'
 
@@ -17,10 +19,13 @@ export default function ChatWithAgent() {
   const recognitionRef = useRef(null);
   const [activeThreadId, setActiveThreadId] = useState(null);
 
+  // GitHub token modal state
+  const [openTokenModal, setOpenTokenModal] = useState(false);
+
   const [input, setInput] = useState("");
   const [openLoader, setOpenLoader] = useState(false);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
-  const [chatScreenHeight, setChatScreenHeight] = useState(mainDashboard ? "30vh" : "76vh");
+  const [chatScreenHeight, setChatScreenHeight] = useState(mainDashboard ? "30vh" : CHAT_WITH_AGENT_SCREEN_HEIGHT);
 
   // Initialize state with empty arrays/objects
   const [conversations, setConversations] = useState([]);
@@ -63,6 +68,7 @@ export default function ChatWithAgent() {
     
     if (storedConversations) {
       setConversations(JSON.parse(storedConversations));
+      setMainDashboard(false);
     }
     
     if (storedThreadsMessages) {
@@ -78,6 +84,7 @@ export default function ChatWithAgent() {
         if (threadsData[storedActiveThreadId]) {
           setMessages(threadsData[storedActiveThreadId]);
           setMainDashboard(false);
+          setChatScreenHeight(CHAT_WITH_AGENT_SCREEN_HEIGHT);
         }
       }
     }
@@ -141,7 +148,7 @@ export default function ChatWithAgent() {
     setMainDashboard(false);
     setSidebarCollapsed(false);
     
-    setChatScreenHeight("76vh");
+    setChatScreenHeight(CHAT_WITH_AGENT_SCREEN_HEIGHT);
     
     enqueueSnackbar("New conversation started", { variant: "success" });
   };
@@ -158,7 +165,7 @@ export default function ChatWithAgent() {
     setMainDashboard(false);
     setSidebarCollapsed(true);
     
-    setChatScreenHeight("76vh");
+    setChatScreenHeight(CHAT_WITH_AGENT_SCREEN_HEIGHT);
     
     setTimeout(() => {
       setScroll();
@@ -192,7 +199,7 @@ export default function ChatWithAgent() {
     
     setMainDashboard(false);
     setSidebarCollapsed(true);
-    setChatScreenHeight("76vh");
+    setChatScreenHeight(CHAT_WITH_AGENT_SCREEN_HEIGHT);
     
     const currentMessages = [...messages];
     
@@ -295,8 +302,23 @@ export default function ChatWithAgent() {
     }
   };
 
+  // Handle GitHub token modal
+  const handleOpenTokenModal = () => {
+    setOpenTokenModal(true);
+  };
+
+  const handleCloseTokenModal = () => {
+    setOpenTokenModal(false);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-white-100 chat-container">
+      {/* GitHub Token Configuration Modal */}
+      <GitHubTokenModal 
+        open={openTokenModal} 
+        onClose={handleCloseTokenModal} 
+      />
+      
       <div className="flex h-full" style={{ paddingLeft: "20px", paddingRight: "20px" }}>
         <div className={mainDashboard || sidebarCollapsed ? '': 'w-1/5 pl-4'}>
           <div
@@ -346,7 +368,7 @@ export default function ChatWithAgent() {
            <Button
             variant="contained"
             color="primary"
-            onClick={() => navigate("/agent-configuration")}
+            onClick={handleOpenTokenModal}
           >
             Configure GitHub Access
           </Button>

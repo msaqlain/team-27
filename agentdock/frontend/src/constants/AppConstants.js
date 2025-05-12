@@ -1,0 +1,1 @@
+export const CHAT_WITH_AGENT_SCREEN_HEIGHT = "76vh";
