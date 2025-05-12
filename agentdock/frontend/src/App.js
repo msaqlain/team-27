@@ -3,6 +3,9 @@ import "./App.css";
 import { SnackbarProvider } from "notistack";
 import { IconButton, Slide } from "@mui/material";
 import Router from "./routes";
+import ChatWithAgent from "./Pages/ChatWithAgent";
+import AgentConfiguration from "./Pages/AgentConfiguration";
+import { Route, Routes } from "react-router-dom";
 
 // import CloseIcon from "@mui/icons-material/Close";
 
@@ -31,7 +34,12 @@ function App() {
       >
         <div style={{ display: 'flex' }}>
           <div style={{ marginLeft: '0px', width: '100%', marginRight: '0px', marginTop: '0px' }}>
-            <Router />
+          <Router>
+            <Routes>
+              <Route path="/" element={<ChatWithAgent />} />
+              <Route path="/agent-configuration" element={<AgentConfiguration />} />
+            </Routes>
+          </Router>
           </div>
         </div>
       </SnackbarProvider>
