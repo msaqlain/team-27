@@ -15,10 +15,12 @@ apps:
     GROQ_API_KEY: "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"
     GITHUB_MCP_URL: "http://localhost:8001"
     SLACK_MCP_URL: "http://localhost:8003"
+    JIRA_MCP_URL: "http://localhost:8004"
 
 - appID: JiraApp
   appDirPath: ./mcp_servers/jira/
   command: ["python", "app.py"]
+  appPort: 8004
   
 - appID: SlackApp
   appDirPath: ./mcp_servers/slack/
@@ -37,6 +39,8 @@ apps:
   env:
     GROQ_API_KEY: "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"
     GITHUB_MCP_URL: "http://localhost:8001"
+    SLACK_MCP_URL: "http://localhost:8003"
+    JIRA_MCP_URL: "http://localhost:8004"
 
 - appID: OrchestratorApp
   appDirPath: ./workflows/orchestrator/

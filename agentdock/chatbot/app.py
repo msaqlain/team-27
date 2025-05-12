@@ -43,6 +43,7 @@ class ChatResponse(BaseModel):
 # MCP Server endpoints - will be configured by Dapr
 GITHUB_MCP_BASE_URL = os.getenv("GITHUB_MCP_URL", "http://localhost:8001")
 SLACK_MCP_BASE_URL = os.getenv("SLACK_MCP_URL", "http://localhost:8003")
+JIRA_MCP_BASE_URL = os.getenv("JIRA_MCP_URL", "http://localhost:8004")
 logger.info(f"GitHub MCP URL: {GITHUB_MCP_BASE_URL}")
 logger.info(f"Slack MCP URL: {SLACK_MCP_BASE_URL}")
 
@@ -90,12 +91,12 @@ async def get_github_token() -> Optional[str]:
     logger.warning("No GitHub token available. Some GitHub operations will be limited to public resources.")
     return None
 
-async def get_slack_token() -> Optional[str]:
+async def get_slack_token(slack_mcp_url: str) -> Optional[str]:
     """Get Slack token from Slack MCP server configuration"""
     try:
-        logger.info(f"Attempting to fetch Slack token from MCP server at {SLACK_MCP_BASE_URL}/config")
+        logger.info(f"Attempting to fetch Slack token from MCP server at {slack_mcp_url}/config")
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{SLACK_MCP_BASE_URL}/config")
+            response = await client.get(f"{slack_mcp_url}/config")
             logger.info(f"Slack MCP server response status: {response.status_code}")
             
             if response.status_code == 200:
@@ -192,70 +193,92 @@ async def call_github_api(endpoint: str, method: str = "GET", data: Optional[Dic
         logger.error(f"Error calling GitHub API: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error calling GitHub API: {str(e)}")
 
-async def call_slack_api(endpoint: str, method: str = "GET", data: Optional[Dict] = None) -> Dict:
-    """Call Slack API endpoint"""
+async def call_slack_api(endpoint: str, method: str = "GET", data: Optional[Dict] = None, slack_mcp_url: str = SLACK_MCP_BASE_URL) -> Dict:
+    """Call Slack API endpoint through the MCP server"""
     try:
-        token = await get_slack_token()
-        if not token:
-            logger.error("No Slack token available")
-            raise HTTPException(
-                status_code=400, 
-                detail="Slack token not configured. Please configure using the MCP server first. Make sure to call POST http://localhost:8003/configure with your token."
-            )
+        logger.info(f"Calling Slack MCP server: {slack_mcp_url}")
         
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json; charset=utf-8"
-        }
+        # Map Slack API endpoints to MCP server endpoints
+        mcp_endpoint = ""
+        if endpoint == "conversations.list":
+            mcp_endpoint = "/channels"
+        elif endpoint == "chat.postMessage":
+            mcp_endpoint = "/message"
+            # Check if we have the required data
+            if not data.get("channel") or not data.get("text"):
+                raise ValueError("Missing channel or text for Slack message")
+        else:
+            logger.error(f"Unsupported Slack endpoint: {endpoint}")
+            raise ValueError(f"Unsupported Slack endpoint: {endpoint}")
         
         async with httpx.AsyncClient() as client:
-            url = f"https://slack.com/api/{endpoint}"
-            logger.info(f"Calling Slack API endpoint: {url}")
+            url = f"{slack_mcp_url}{mcp_endpoint}"
+            logger.info(f"Calling Slack MCP endpoint: {url}")
             
             if method == "GET":
-                response = await client.get(url, headers=headers, params=data)
+                response = await client.get(url)
             elif method == "POST":
-                response = await client.post(url, headers=headers, json=data)
+                # Transform the data format if needed
+                if mcp_endpoint == "/message":
+                    mcp_data = {
+                        "channel": data.get("channel"),
+                        "text": data.get("text")
+                    }
+                else:
+                    mcp_data = data
+                
+                response = await client.post(url, json=mcp_data)
             else:
                 raise ValueError(f"Unsupported method: {method}")
             
-            response_json = response.json()
+            if response.status_code >= 400:
+                logger.error(f"Slack MCP error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=f"Slack MCP error: {response.text}")
             
-            if not response_json.get("ok", False):
-                logger.error(f"Slack API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=response.status_code, detail=f"Slack API error: {response.text}")
+            return response.json()
             
-            return response_json
     except Exception as e:
-        logger.error(f"Error calling Slack API: {str(e)}")
-        raise
+        logger.error(f"Error calling Slack MCP API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error calling Slack MCP: {str(e)}")
 
 def determine_intent(message: str) -> Dict:
-    """Determine if the message is related to GitHub, Slack, or both"""
+    """Determine if the message is related to GitHub, Slack, Jira, or a combination"""
     try:
         prompt = f"""
-        You are an intent classifier for a chatbot that handles GitHub and Slack operations. 
+        You are an intent classifier for a chatbot that handles GitHub, Slack, and Jira operations. 
         Analyze this message: "{message}"
         
         Return a JSON object with:
-        1. "platform": Either "github", "slack", "both", or "conversation" (for general chat)
+        1. "platform": One of "github", "slack", "jira", "github_slack", "conversation" (for general chat)
         2. "confidence": A number between 0 and 1 indicating your confidence
         
-        If platform is "github" or "both", include these fields for GitHub:
+        If platform is "github" or involves GitHub, include these fields:
         - github_action: one of [list_prs, get_pr_summary, get_stats, create_pr, list_my_repos]
         - owner: repository owner (if mentioned)
         - repo: repository name (if mentioned)
         - pr_number: pull request number (if mentioned)
-        
-        If platform is "slack" or "both", include these fields for Slack:
-        - slack_action: one of [list_channels, send_message, get_conversation_history]
-        - channel: channel name or ID (if mentioned)
-        - message_content: content of message to send (if applicable)
-        - time_range: time range for history (if applicable)
         - pr_title: pull request title (if mentioned)
         - pr_body: pull request body (if mentioned)
         - pr_head: pull request head (if mentioned)
         - pr_base: pull request base branch (if mentioned)
+        
+        If platform is "slack" or involves Slack, include these fields:
+        - slack_action: one of [list_channels, send_message, get_conversation_history]
+        - channel: channel name or ID (if mentioned)
+        - message_content: content of message to send (if applicable)
+        - time_range: time range for history (if applicable)
+        
+        If platform is "jira" or involves Jira, include these fields:
+        - jira_action: one of [list_projects, list_tickets, get_ticket, create_ticket, update_ticket]
+        - project_key: project key (if mentioned)
+        - ticket_id: ticket ID or key (if mentioned)
+        - summary: ticket summary (if mentioned)
+        - description: ticket description (if mentioned)
+        - status: ticket status (if mentioned)
+        - priority: ticket priority (if mentioned)
+        - assignee: ticket assignee (if mentioned)
+        - issue_type: issue type (if mentioned)
+        - labels: ticket labels (if mentioned)
         
         Return ONLY the JSON object, no other text.
         """
@@ -264,7 +287,7 @@ def determine_intent(message: str) -> Dict:
         completion = client.chat.completions.create(
             model="llama3-8b-8192",
             messages=[
-                {"role": "system", "content": "You are an intent classifier for GitHub and Slack operations. Always return valid JSON."},
+                {"role": "system", "content": "You are an intent classifier for GitHub, Slack, and Jira operations. Always return valid JSON."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
@@ -508,7 +531,7 @@ async def handle_slack_request(params: Dict, slack_mcp_url: str) -> Dict:
     time_range = params.get("time_range")
     
     # Check if Slack is configured
-    token = await get_slack_token()
+    token = await get_slack_token(slack_mcp_url)
     if not token:
         return {
             "response": "To use Slack functionality, you need to configure Slack first. Please use:\n\n"
@@ -523,15 +546,22 @@ async def handle_slack_request(params: Dict, slack_mcp_url: str) -> Dict:
         try:
             result = await call_slack_api("conversations.list", method="GET", data={"types": "public_channel,private_channel"})
             
-            channels = result.get("channels", [])
+            # Extract channels from the result, handling different possible response formats
+            channels = []
+            if isinstance(result, dict):
+                channels = result.get("channels", [])
+            elif isinstance(result, list):
+                channels = result  # In case the MCP server returns a direct list
+            
             if not channels:
                 return {
                     "response": "No channels found in your Slack workspace.",
                     "action_taken": {"action": "list_channels", "result": []}
                 }
             
+            # Format the channel list for display
             channels_list = "\n".join([
-                f"• #{channel['name']} ({channel['id']}) - {'Private' if channel.get('is_private', False) else 'Public'}"
+                f"• #{channel.get('name', 'unknown')} ({channel.get('id', 'unknown')}) - {'Private' if channel.get('is_private', False) else 'Public'}"
                 for channel in channels
             ])
             
@@ -682,7 +712,8 @@ async def handle_cross_platform_action(github_result: Dict, slack_params: Dict, 
                 "text": message_content,
                 "parse": "full",
                 "unfurl_links": True
-            }
+            },
+            slack_mcp_url=slack_mcp_url
         )
         
         return {
@@ -711,11 +742,13 @@ async def chat(message: ChatMessage):
         context = message.context or {}
         github_mcp_url = context.get("github_mcp_url", GITHUB_MCP_BASE_URL)
         slack_mcp_url = context.get("slack_mcp_url", SLACK_MCP_BASE_URL)
+        jira_mcp_url = context.get("jira_mcp_url", JIRA_MCP_BASE_URL)
         
         logger.info(f"Using GitHub MCP URL: {github_mcp_url}")
         logger.info(f"Using Slack MCP URL: {slack_mcp_url}")
+        logger.info(f"Using Jira MCP URL: {jira_mcp_url}")
         
-        # Determine intent (GitHub, Slack, or both)
+        # Determine intent (GitHub, Slack, Jira, or combination)
         intent = determine_intent(message.message)
         platform = intent.get("platform", "conversation")
         
@@ -727,7 +760,7 @@ async def chat(message: ChatMessage):
                 response="Hello! I'm your assistant. I can help you with:\n"
                         "• GitHub: View repositories, check pull requests, get repository statistics\n"
                         "• Slack: List channels, send messages, get conversation history\n"
-                        "• Cross-platform: Send GitHub information to Slack channels\n\n"
+                        "• Jira: List projects, view tickets, create and update tickets\n\n"
                         "Just let me know what you'd like to do!",
                 action_taken={"action": "conversation"}
             )
@@ -748,8 +781,16 @@ async def chat(message: ChatMessage):
                 action_taken=result["action_taken"]
             )
         
-        # Handle cross-platform requests (both GitHub and Slack)
-        elif platform == "both":
+        # Handle Jira-only requests
+        elif platform == "jira":
+            result = await handle_jira_request(intent, jira_mcp_url)
+            return ChatResponse(
+                response=result["response"],
+                action_taken=result["action_taken"]
+            )
+        
+        # Handle cross-platform requests (GitHub and Slack)
+        elif platform == "github_slack":
             # First handle the GitHub part
             github_result = await handle_github_request(intent, github_mcp_url)
             
@@ -773,9 +814,10 @@ async def chat(message: ChatMessage):
                     }
                 )
         
+        # Handle other platform combinations as needed
         else:
             return ChatResponse(
-                response="I'm not sure what you're asking for. Could you please clarify if you need help with GitHub, Slack, or both?",
+                response="I'm not sure what you're asking for. Could you please clarify if you need help with GitHub, Slack, Jira, or a combination?",
                 action_taken=None
             )
             
@@ -785,6 +827,309 @@ async def chat(message: ChatMessage):
             response=f"Sorry, I encountered an error: {str(e)}",
             action_taken=None
         )
+
+async def get_jira_config(jira_mcp_url: str) -> Optional[Dict]:
+    """Get Jira configuration from the MCP server"""
+    try:
+        logger.info(f"Attempting to fetch Jira config from MCP server at {jira_mcp_url}/config")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{jira_mcp_url}/config")
+            if response.status_code == 200:
+                config = response.json()
+                logger.info("Successfully retrieved Jira configuration from MCP server")
+                return config
+            else:
+                logger.error(f"Failed to get Jira configuration: {response.status_code} - {response.text}")
+                return None
+    except Exception as e:
+        logger.error(f"Error getting Jira configuration: {str(e)}")
+        return None
+
+async def call_jira_api(endpoint: str, method: str = "GET", data: Optional[Dict] = None, jira_mcp_url: str = JIRA_MCP_BASE_URL) -> Dict:
+    """Call Jira API endpoint through the MCP server"""
+    try:
+        logger.info(f"Calling Jira MCP server: {jira_mcp_url}")
+        
+        async with httpx.AsyncClient() as client:
+            url = f"{jira_mcp_url}{endpoint}"
+            logger.info(f"Calling Jira MCP endpoint: {url}")
+            
+            if method == "GET":
+                response = await client.get(url, params=data)
+            elif method == "POST":
+                response = await client.post(url, json=data)
+            elif method == "PUT":
+                response = await client.put(url, json=data)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+            
+            if response.status_code >= 400:
+                logger.error(f"Jira MCP error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=f"Jira MCP error: {response.text}")
+            
+            return response.json()
+            
+    except Exception as e:
+        logger.error(f"Error calling Jira MCP API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error calling Jira MCP: {str(e)}")
+
+async def handle_jira_request(params: Dict, jira_mcp_url: str) -> Dict:
+    """Handle Jira-related requests"""
+    action = params.get("jira_action")
+    project_key = params.get("project_key")
+    ticket_id = params.get("ticket_id")
+    
+    # Check if Jira is configured
+    config = await get_jira_config(jira_mcp_url)
+    if not config:
+        return {
+            "response": "To use Jira functionality, you need to configure Jira first. Please configure it in the settings.",
+            "action_taken": None
+        }
+    
+    # Handle list_projects action
+    if action == "list_projects":
+        try:
+            result = await call_jira_api("/projects", jira_mcp_url=jira_mcp_url)
+            
+            projects = result.get("projects", [])
+            if not projects:
+                return {
+                    "response": "No projects found in your Jira instance.",
+                    "action_taken": {"action": "list_projects", "result": []}
+                }
+            
+            # Format the project list for display
+            projects_list = "\n".join([
+                f"• {project.get('name', 'Unknown')} ({project.get('key', 'Unknown')}) - {project.get('projectTypeKey', 'Unknown')} project"
+                for project in projects
+            ])
+            
+            return {
+                "response": f"Here are the projects in your Jira instance:\n\n{projects_list}",
+                "action_taken": {"action": "list_projects", "result": projects}
+            }
+        except Exception as e:
+            logger.error(f"Error listing Jira projects: {str(e)}")
+            return {
+                "response": f"Error listing Jira projects: {str(e)}",
+                "action_taken": None
+            }
+    
+    # Handle list_tickets action
+    elif action == "list_tickets":
+        if not project_key:
+            return {
+                "response": "I need a project key to list tickets. Please provide one.",
+                "action_taken": None
+            }
+        
+        try:
+            query_params = {"project_key": project_key}
+            
+            # Add optional filters if provided
+            status = params.get("status")
+            assignee = params.get("assignee")
+            if status:
+                query_params["status"] = status
+            if assignee:
+                query_params["assignee"] = assignee
+            
+            result = await call_jira_api("/tickets", method="GET", data=query_params, jira_mcp_url=jira_mcp_url)
+            
+            tickets = result.get("tickets", [])
+            if not tickets:
+                return {
+                    "response": f"No tickets found for project {project_key}.",
+                    "action_taken": {"action": "list_tickets", "result": []}
+                }
+            
+            # Format the ticket list for display
+            tickets_list = "\n".join([
+                f"• {ticket.get('key', 'Unknown')}: {ticket.get('summary', 'No summary')}\n"
+                f"  Status: {ticket.get('status', 'Unknown')} | Priority: {ticket.get('priority', 'Unknown')} | Assignee: {ticket.get('assignee', 'Unassigned')}"
+                for ticket in tickets[:10]  # Limit to 10 tickets for readability
+            ])
+            
+            total = result.get("total", 0)
+            if total > 10:
+                tickets_list += f"\n\n...and {total - 10} more tickets."
+            
+            return {
+                "response": f"Here are the tickets for project {project_key}:\n\n{tickets_list}",
+                "action_taken": {"action": "list_tickets", "result": tickets}
+            }
+        except Exception as e:
+            logger.error(f"Error listing Jira tickets: {str(e)}")
+            return {
+                "response": f"Error listing Jira tickets: {str(e)}",
+                "action_taken": None
+            }
+    
+    # Handle get_ticket action
+    elif action == "get_ticket":
+        if not ticket_id:
+            return {
+                "response": "I need a ticket ID to get details. Please provide one.",
+                "action_taken": None
+            }
+        
+        try:
+            result = await call_jira_api(f"/ticket/{ticket_id}", jira_mcp_url=jira_mcp_url)
+            
+            ticket = result.get("ticket", {})
+            if not ticket:
+                return {
+                    "response": f"Ticket {ticket_id} not found.",
+                    "action_taken": {"action": "get_ticket", "result": None}
+                }
+            
+            # Format the ticket details for display
+            ticket_details = (
+                f"**{ticket.get('key', 'Unknown')}: {ticket.get('summary', 'No summary')}**\n\n"
+                f"**Project**: {ticket.get('project', 'Unknown')}\n"
+                f"**Status**: {ticket.get('status', 'Unknown')}\n"
+                f"**Type**: {ticket.get('issue_type', 'Unknown')}\n"
+                f"**Priority**: {ticket.get('priority', 'Unknown')}\n"
+                f"**Assignee**: {ticket.get('assignee', 'Unassigned')}\n"
+                f"**Reporter**: {ticket.get('reporter', 'Unknown')}\n"
+                f"**Created**: {ticket.get('created', 'Unknown')}\n"
+                f"**Updated**: {ticket.get('updated', 'Unknown')}\n\n"
+                f"**Description**:\n{ticket.get('description', 'No description')}"
+            )
+            
+            return {
+                "response": f"Here are the details for ticket {ticket_id}:\n\n{ticket_details}",
+                "action_taken": {"action": "get_ticket", "result": ticket}
+            }
+        except Exception as e:
+            logger.error(f"Error getting Jira ticket: {str(e)}")
+            return {
+                "response": f"Error getting Jira ticket details: {str(e)}",
+                "action_taken": None
+            }
+    
+    # Handle create_ticket action
+    elif action == "create_ticket":
+        if not project_key:
+            return {
+                "response": "I need a project key to create a ticket. Please provide one.",
+                "action_taken": None
+            }
+        
+        summary = params.get("summary")
+        if not summary:
+            return {
+                "response": "I need a summary to create a ticket. Please provide one.",
+                "action_taken": None
+            }
+        
+        try:
+            ticket_data = {
+                "summary": summary,
+                "project_key": project_key,
+                "issue_type": params.get("issue_type", "Task")
+            }
+            
+            # Add optional fields if provided
+            description = params.get("description")
+            priority = params.get("priority")
+            assignee = params.get("assignee")
+            labels = params.get("labels")
+            
+            if description:
+                ticket_data["description"] = description
+            if priority:
+                ticket_data["priority"] = priority
+            if assignee:
+                ticket_data["assignee"] = assignee
+            if labels:
+                ticket_data["labels"] = labels if isinstance(labels, list) else [labels]
+            
+            result = await call_jira_api("/ticket/create", method="POST", data=ticket_data, jira_mcp_url=jira_mcp_url)
+            
+            ticket_key = result.get("key")
+            if not ticket_key:
+                return {
+                    "response": "Ticket created successfully, but unable to retrieve its key.",
+                    "action_taken": {"action": "create_ticket", "result": result}
+                }
+            
+            ticket = result.get("ticket", {})
+            
+            return {
+                "response": f"Ticket {ticket_key} created successfully:\n\n"
+                          f"**{ticket.get('key', 'Unknown')}: {ticket.get('summary', 'No summary')}**\n"
+                          f"**Status**: {ticket.get('status', 'Unknown')} | **Priority**: {ticket.get('priority', 'Unknown')} | **Assignee**: {ticket.get('assignee', 'Unassigned')}",
+                "action_taken": {"action": "create_ticket", "result": ticket}
+            }
+        except Exception as e:
+            logger.error(f"Error creating Jira ticket: {str(e)}")
+            return {
+                "response": f"Error creating Jira ticket: {str(e)}",
+                "action_taken": None
+            }
+    
+    # Handle update_ticket action
+    elif action == "update_ticket":
+        if not ticket_id:
+            return {
+                "response": "I need a ticket ID to update. Please provide one.",
+                "action_taken": None
+            }
+        
+        try:
+            update_data = {}
+            
+            # Add fields that should be updated
+            summary = params.get("summary")
+            description = params.get("description")
+            status = params.get("status")
+            priority = params.get("priority")
+            assignee = params.get("assignee")
+            labels = params.get("labels")
+            
+            if summary:
+                update_data["summary"] = summary
+            if description:
+                update_data["description"] = description
+            if status:
+                update_data["status"] = status
+            if priority:
+                update_data["priority"] = priority
+            if assignee:
+                update_data["assignee"] = assignee
+            if labels:
+                update_data["labels"] = labels if isinstance(labels, list) else [labels]
+            
+            if not update_data:
+                return {
+                    "response": "I need at least one field to update. Please provide summary, description, status, priority, assignee, or labels.",
+                    "action_taken": None
+                }
+            
+            result = await call_jira_api(f"/ticket/{ticket_id}", method="PUT", data=update_data, jira_mcp_url=jira_mcp_url)
+            
+            ticket = result.get("ticket", {})
+            
+            return {
+                "response": f"Ticket {ticket_id} updated successfully:\n\n"
+                          f"**{ticket.get('key', 'Unknown')}: {ticket.get('summary', 'No summary')}**\n"
+                          f"**Status**: {ticket.get('status', 'Unknown')} | **Priority**: {ticket.get('priority', 'Unknown')} | **Assignee**: {ticket.get('assignee', 'Unassigned')}",
+                "action_taken": {"action": "update_ticket", "result": ticket}
+            }
+        except Exception as e:
+            logger.error(f"Error updating Jira ticket: {str(e)}")
+            return {
+                "response": f"Error updating Jira ticket: {str(e)}",
+                "action_taken": None
+            }
+    
+    else:
+        return {
+            "response": f"I understand you want to perform a Jira action ({action}), but I need more information to proceed.",
+            "action_taken": None
+        }
 
 if __name__ == "__main__":
     import uvicorn

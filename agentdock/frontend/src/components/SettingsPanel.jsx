@@ -50,6 +50,13 @@ const SettingsPanel = ({
     return status && !status.includes('failed');
   };
 
+  const openZipkinLogs = () => {
+    // Get current timestamp in milliseconds
+    const currentTimestamp = Date.now();
+    // Open Zipkin logs in a new window (15 min lookback)
+    window.open(`http://localhost:9411/zipkin/?lookback=15m&endTs=${currentTimestamp}&limit=10`, '_blank');
+  };
+
   return (
     <div className="p-8">
       {/* Configuration Modals */}
@@ -76,12 +83,22 @@ const SettingsPanel = ({
       />
       <div className="mb-8 mt-2 flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">Integration Settings</h2>
-        <button 
-          className="text-blue-600 hover:text-blue-800 flex items-center"
-          onClick={onBackToChat}
-        >
-          <span>Back to Chat</span>
-        </button>
+        <div className="flex items-center">
+          <Button 
+            variant="outlined" 
+            color="primary"
+            onClick={openZipkinLogs}
+            sx={{ marginRight: 2 }}
+          >
+            Show Logs
+          </Button>
+          <button 
+            className="text-blue-600 hover:text-blue-800 flex items-center"
+            onClick={onBackToChat}
+          >
+            <span>Back to Chat</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -175,6 +192,28 @@ const SettingsPanel = ({
             startIcon={<JiraIcon size={20} currentColor="#fff" />}
           >
             {isConfigured(jiraStatus) ? 'Update Jira Configuration' : 'Configure Jira'}
+          </Button>
+        </div>
+        
+        {/* Logs Section */}
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <div className="flex items-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <h3 className="text-xl font-semibold ml-2">Monitoring & Logs</h3>
+          </div>
+          <p className="text-gray-600 mb-4">
+            View application traces and logs to monitor system performance and troubleshoot issues.
+          </p>
+          
+          <Button 
+            variant="contained" 
+            color="secondary"
+            onClick={openZipkinLogs}
+            fullWidth
+          >
+            Open Zipkin Logs
           </Button>
         </div>
       </div>

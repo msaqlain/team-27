@@ -70,7 +70,9 @@ async def list_channels():
         if not data.get("ok"):
             raise HTTPException(status_code=400, detail="Failed to list channels")
 
-        return [{"id": ch["id"], "name": ch["name"]} for ch in data["channels"]]
+        channels = [{"id": ch["id"], "name": ch["name"]} for ch in data["channels"]]
+        # Return with a proper structure that includes a 'channels' field
+        return {"channels": channels, "status": "success"}
 
 @app.post("/message")
 async def send_message(payload: SlackMessage):
