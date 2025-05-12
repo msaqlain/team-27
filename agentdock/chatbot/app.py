@@ -47,8 +47,10 @@ class ChatResponse(BaseModel):
 # MCP Server endpoints - will be configured by Dapr
 GITHUB_MCP_BASE_URL = os.getenv("GITHUB_MCP_URL", "http://localhost:8001")
 SLACK_MCP_BASE_URL = os.getenv("SLACK_MCP_URL", "http://localhost:8003")
+JIRA_MCP_BASE_URL = os.getenv("JIRA_MCP_URL", "http://localhost:8004")
 logger.info(f"GitHub MCP URL: {GITHUB_MCP_BASE_URL}")
 logger.info(f"Slack MCP URL: {SLACK_MCP_BASE_URL}")
+logger.info(f"Jira MCP URL: {JIRA_MCP_BASE_URL}")
 
 # GitHub configuration
 GITHUB_API_BASE_URL = "https://api.github.com"
