@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   TextField,
@@ -14,7 +14,7 @@ import { useNavigate } from "react-router-dom";
 const AgentConfiguration = () => {
   const navigate = useNavigate()
   const [githubToken, setGithubToken] = useState("");
-  const [slackToken, setSlackToken] = useState("");
+  // const [slackToken, setSlackToken] = useState("");
   const [open, setOpen] = useState(false);
   const [success, setSuccess] = useState(true);
   const [message, setMessage] = useState("");
@@ -32,8 +32,13 @@ const AgentConfiguration = () => {
     }
   };
 
+  useEffect(() => {
+    handleSlackSubmit()
+  },[])
+
   const handleSlackSubmit = async () => {
     try {
+      const slackToken = "xoxb-8903182592848-8884517421220-Y13IGtV5qRSaxi9SjbogytFv"
       await axios.post("http://localhost:8003/configure", { token: slackToken });
       setSuccess(true);
       setMessage("Slack token configured successfully");
@@ -77,10 +82,10 @@ const AgentConfiguration = () => {
         Submit GitHub Token
       </Button>
 
-      <Divider sx={{ my: 4 }} />
+      {/* <Divider sx={{ my: 4 }} /> */}
 
       {/* Slack Token Configuration */}
-      <Typography variant="h5" gutterBottom>
+      {/* <Typography variant="h5" gutterBottom>
         Configure Slack Access
       </Typography>
       <TextField
@@ -95,7 +100,7 @@ const AgentConfiguration = () => {
       <br />
       <Button variant="contained" color="primary" onClick={handleSlackSubmit}>
         Submit Slack Token
-      </Button>
+      </Button> */}
 
       {/* Shared Snackbar for Feedback */}
       <Snackbar open={open} autoHideDuration={3000} onClose={handleClose}>
