@@ -15,12 +15,19 @@ export default function ChatWithAgent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
+  const [activeThreadId, setActiveThreadId] = useState(null);
 
   const [input, setInput] = useState("");
   const [openLoader, setOpenLoader] = useState(false);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
-  const [chatScreenHeight, setChatScreenHeight] = useState("30vh");
+  const [chatScreenHeight, setChatScreenHeight] = useState(mainDashboard ? "30vh" : "76vh");
 
+  // Initialize state with empty arrays/objects
+  const [conversations, setConversations] = useState([]);
+  const [threadsMessages, setThreadsMessages] = useState({});
+  const [messages, setMessages] = useState([]);
+
+  // Initialize speech recognition
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -33,8 +40,6 @@ export default function ChatWithAgent() {
         const transcript = event.results[0][0].transcript;
         setInput(transcript);
         setIsListening(false);
-        // Optional: send automatically
-        // handleSend();
       };
   
       recognition.onerror = (event) => {
@@ -50,6 +55,63 @@ export default function ChatWithAgent() {
     }
   }, []);
 
+  // Load conversations and threads from localStorage on component mount
+  useEffect(() => {
+    const storedConversations = localStorage.getItem('conversations');
+    const storedThreadsMessages = localStorage.getItem('threadsMessages');
+    const storedActiveThreadId = localStorage.getItem('activeThreadId');
+    
+    if (storedConversations) {
+      setConversations(JSON.parse(storedConversations));
+    }
+    
+    if (storedThreadsMessages) {
+      setThreadsMessages(JSON.parse(storedThreadsMessages));
+    }
+    
+    if (storedActiveThreadId) {
+      setActiveThreadId(JSON.parse(storedActiveThreadId));
+      
+      // If there was an active thread, load its messages
+      if (storedThreadsMessages) {
+        const threadsData = JSON.parse(storedThreadsMessages);
+        if (threadsData[storedActiveThreadId]) {
+          setMessages(threadsData[storedActiveThreadId]);
+          setMainDashboard(false);
+        }
+      }
+    }
+
+    // Also check for standalone messages (for backward compatibility)
+    const storedMessages = sessionStorage.getItem("messages");
+    if (storedMessages && !storedActiveThreadId) {
+      setMessages(JSON.parse(storedMessages));
+    }
+    
+    setTimeout(() => {
+      setScroll();
+    }, 200);
+  }, []);
+
+  // Save conversations and threads to localStorage when they change
+  useEffect(() => {
+    if (conversations.length > 0) {
+      localStorage.setItem('conversations', JSON.stringify(conversations));
+    }
+  }, [conversations]);
+
+  useEffect(() => {
+    if (Object.keys(threadsMessages).length > 0) {
+      localStorage.setItem('threadsMessages', JSON.stringify(threadsMessages));
+    }
+  }, [threadsMessages]);
+
+  useEffect(() => {
+    if (activeThreadId) {
+      localStorage.setItem('activeThreadId', JSON.stringify(activeThreadId));
+    }
+  }, [activeThreadId]);
+
   const handleMicClick = () => {
     if (!recognitionRef.current) return;
     if (isListening) {
@@ -62,17 +124,51 @@ export default function ChatWithAgent() {
     }
   };
 
-  const conversations = [
-    { id: 3, title: "Sample Conversation" }
-  ];
-
-  const [history, setHistory] = useState(conversations);
+  const createNewThread = () => {
+    const newThreadId = Date.now();
+    
+    const newThread = {
+      id: newThreadId,
+      title: "New Conversation",
+    };
+    
+    setConversations(prev => [newThread, ...prev]);
+    
+    setMessages([]);
+    
+    setActiveThreadId(newThreadId);
+    
+    setMainDashboard(false);
+    setSidebarCollapsed(false);
+    
+    setChatScreenHeight("76vh");
+    
+    enqueueSnackbar("New conversation started", { variant: "success" });
+  };
+  
+  const selectThread = (threadId) => {
+    setActiveThreadId(threadId);
+    
+    if (threadsMessages[threadId]) {
+      setMessages(threadsMessages[threadId]);
+    } else {
+      setMessages([]);
+    }
+    
+    setMainDashboard(false);
+    setSidebarCollapsed(true);
+    
+    setChatScreenHeight("76vh");
+    
+    setTimeout(() => {
+      setScroll();
+    }, 100);
+  };
 
   const cleanAssistantMessage = (html) => {
     return html.replace(/(\d+\.)\s+(\S)/g, '$1 $2');
   };
   
-  // Scroll to the bottom of the chat container
   const setScroll = () => {
     if (containerRef.current) {
       containerRef.current.scrollTo({
@@ -81,30 +177,51 @@ export default function ChatWithAgent() {
       });
     }
   };
-  
-  // Initialize messages to an empty array
-  const [messages, setMessages] = useState([]);
 
-  // Handle sending a message
   const handleSend = async () => {
-    if (!input.trim()) return; // Prevent sending empty messages
-    setMainDashboard(false);
-    setSidebarCollapsed(true); // Ensure sidebar is collapsed by default when starting chat
-    setChatScreenHeight("78vh");
+    if (!input.trim()) return;
     
-    // Create a deepcopy of the current messages
+    if (!activeThreadId) {
+      const newThreadId = Date.now();
+      setActiveThreadId(newThreadId);
+      setConversations(prev => [{
+        id: newThreadId,
+        title: input.slice(0, 20) + (input.length > 20 ? "..." : "")
+      }, ...prev]);
+    }
+    
+    setMainDashboard(false);
+    setSidebarCollapsed(true);
+    setChatScreenHeight("76vh");
+    
     const currentMessages = [...messages];
     
-    // Display user's new message on UI
     const userMessage = { 
       user: input,
       assistant: "Thinking..."
     };
-    setMessages([...currentMessages, userMessage]); // Update state
+    
+    const updatedMessages = [...currentMessages, userMessage];
+    setMessages(updatedMessages);
+    
+    setThreadsMessages(prev => ({
+      ...prev,
+      [activeThreadId]: updatedMessages
+    }));
+    
+    if (currentMessages.length === 0) {
+      setConversations(prev => 
+        prev.map(conv => 
+          conv.id === activeThreadId 
+            ? { ...conv, title: input.slice(0, 20) + (input.length > 20 ? "..." : "") } 
+            : conv
+        )
+      );
+    }
 
-    setInput(""); // Clear input
-    setOpenLoader(true); // Disable input
-    setIsWaitingForResponse(true); // Mark that we're waiting for a response
+    setInput("");
+    setOpenLoader(true);
+    setIsWaitingForResponse(true);
 
     setTimeout(() => {
       setScroll();
@@ -117,7 +234,6 @@ export default function ChatWithAgent() {
 
       setMessages(prev => {
         const updated = [...prev];
-        // Replace the "Thinking..." with "Searching..."
         if (updated.length > 0) {
           updated[updated.length - 1] = {
             ...updated[updated.length - 1],
@@ -130,7 +246,7 @@ export default function ChatWithAgent() {
       let previousChunk = "";
 
       for await (const chunk of stream) {
-        const newText = chunk.slice(previousChunk.length); // only get the new part
+        const newText = chunk.slice(previousChunk.length);
         previousChunk = chunk;
 
         const formattedChunk = newText.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -146,6 +262,14 @@ export default function ChatWithAgent() {
                 .replace("? ", "?\n"),
             };
           }
+          
+          if (activeThreadId) {
+            setThreadsMessages(prevThreads => ({
+              ...prevThreads,
+              [activeThreadId]: updated
+            }));
+          }
+          
           return updated;
         });
 
@@ -154,34 +278,22 @@ export default function ChatWithAgent() {
         }, 200);
       }
       
-      // Response is complete, re-enable input
       setOpenLoader(false);
       setIsWaitingForResponse(false);
 
     } catch (error) {
       enqueueSnackbar(`Error while streaming response ${error}`);
-      // Even if there's an error, re-enable the input
       setOpenLoader(false);
       setIsWaitingForResponse(false);
     }
   };
 
-  // Handle Enter key press
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault(); // Prevent new line
+      e.preventDefault();
       handleSend();
     }
   };
-
-  // Load messages from session storage on component mount
-  useEffect(() => {
-    const storedMessages = sessionStorage.getItem("messages");
-    if (storedMessages) {
-      setMessages(JSON.parse(storedMessages));
-    }
-    setScroll();
-  }, []);
 
   return (
     <div className="flex flex-col h-screen bg-white-100 chat-container">
@@ -201,9 +313,8 @@ export default function ChatWithAgent() {
               </div>
               <div style={{ display: "inline-block", marginTop: "10px" }}>
                 <button
-                  onClick={() => {
-                    enqueueSnackbar("Feature not implemented yet. New chat functionality is in progress.");
-                  }}
+                  onClick={createNewThread}
+                  title="New conversation"
                 >
                   <PlusIcon size={20} currentColor={"#6b7280"} className="mr-2 gray-500" />
                 </button>
@@ -211,12 +322,21 @@ export default function ChatWithAgent() {
             </div>
 
             <div className={`mt-4 pl-3 block`}>
-            <div className={`mt-4 pl-3 block`}>
+            <div className={`mt-4 pl-3 pr-3 block`}>
               <div className="mb-4">
                 <ul className="mt-2">
                   {conversations.map((chat) => (
-                    <li key={chat.id} className="p-2 rounded-md hover:bg-gray-200 cursor-pointer">
-                      <button onClick={() => enqueueSnackbar("Feature not implemented yet. New chat functionality is in progress.")} value={chat.id}> {chat.title} </button> 
+                    <li 
+                      key={chat.id} 
+                      className={`p-2 rounded-md hover:bg-gray-200 cursor-pointer ${activeThreadId === chat.id ? 'bg-gray-200' : ''}`}
+                    >
+                      <button 
+                        onClick={() => selectThread(chat.id)} 
+                        value={chat.id}
+                        className="w-full text-left"
+                      > 
+                        {chat.title} 
+                      </button> 
                     </li>
                   ))}
                 </ul>
@@ -233,7 +353,6 @@ export default function ChatWithAgent() {
             </div>
           </div>
           
-          {/* Collapse/Expand button */}
           {!mainDashboard && (
             <div 
               className={`fixed top-1/2 ${sidebarCollapsed ? 'left-0' : 'left-[20%]'} z-10 bg-gray-200 p-2 rounded-r-md cursor-pointer shadow-md transition-all duration-500 sidebar-toggle`}
@@ -254,7 +373,6 @@ export default function ChatWithAgent() {
           >
             {messages.map((msg, index) => (
               <div key={index}>
-                {/* User message aligned to the right */}
                 {msg.user && (
                   <div className="flex justify-end">
                     <div className="flex items-start space-x-2">
@@ -267,7 +385,6 @@ export default function ChatWithAgent() {
                   </div>
                 )}
 
-                {/* Assistant message aligned to the left */}
                 {msg.assistant && (
                   <div className="flex justify-start mt-2">
                     <div className="flex items-start space-x-2">
@@ -305,7 +422,7 @@ export default function ChatWithAgent() {
                 className="p-1 border flex flex-col items-start shadow-md mx-3 my-2 rounded-xl transition-all duration-100 focus-within:border-2 focus-within:border-black"
               >
                 <textarea
-                  className={`w-full p-3 bg-gray-100 text-gray-800 rounded-full outline-none resize-none ${isWaitingForResponse ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  className={`w-full p-3 bg-gray-100 text-gray-800 outline-none resize-none ${isWaitingForResponse ? 'opacity-60 cursor-not-allowed' : ''}`}
                   placeholder={isWaitingForResponse ? "Waiting for response..." : "Send a message..."}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
