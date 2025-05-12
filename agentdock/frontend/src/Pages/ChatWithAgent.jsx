@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSnackbar } from "notistack";
-import { ArrowUpIcon, PlusIcon, SparklesIcon } from "../components/icons.tsx";
+import { ArrowUpIcon, PlusIcon, SparklesIcon, ChevronLeftIcon, ChevronRightIcon } from "../components/icons.tsx";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@mui/material";
 import { DoChat } from "../DAL/Chat/chat.js";
@@ -12,6 +12,7 @@ export default function ChatWithAgent() {
   const containerRef = useRef(null);
   const { enqueueSnackbar } = useSnackbar();
   const [mainDashboard, setMainDashboard] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   const [input, setInput] = useState("");
   const [openLoader, setOpenLoader] = useState(false);
@@ -48,6 +49,7 @@ export default function ChatWithAgent() {
   const handleSend = async () => {
     if (!input.trim()) return; // Prevent sending empty messages
     setMainDashboard(false);
+    setSidebarCollapsed(true); // Ensure sidebar is collapsed by default when starting chat
     setChatScreenHeight("78vh");
     
     // Create a deepcopy of the current messages
@@ -139,19 +141,11 @@ export default function ChatWithAgent() {
 
   return (
     <div className="flex flex-col h-screen bg-white-100 chat-container">
-      <Button
-        variant="contained"
-        color="primary"
-        sx={{ position: "absolute", top: 16, right: 16 }}
-        onClick={() => navigate("/agent-configuration")}
-      >
-        Configure Agent Access
-      </Button>
       <div className="flex h-full" style={{ paddingLeft: "20px", paddingRight: "20px" }}>
-        <div className={mainDashboard ? '' : 'w-1/5 pl-4'}>
+        <div className={mainDashboard || sidebarCollapsed ? '': 'w-1/5 pl-4'}>
           <div
             className={`fixed top-0 left-0 h-full bg-gray-100 shadow-lg transform transition-transform duration-500 ${
-              !mainDashboard ? "translate-x-0" : "-translate-x-full"
+              !mainDashboard && !sidebarCollapsed ? "translate-x-0" : "-translate-x-full"
             }`}
             style={{ width: "20%" }}
           >
@@ -159,9 +153,6 @@ export default function ChatWithAgent() {
               <div className="bg-gray-100 text-white text-md font-bold flex justify-between">
                 <div style={{ display: "inline-block" }} className="text-gray-500">
                   <img src={`${process.env.PUBLIC_URL}/logo.png`} width='60px' height='25px' alt="Logo" style={{display: 'inline-block'}} />
-                </div>
-                <div style={{ display: "inline-block", marginTop: '10px' }} className="text-gray-500">
-                  <p style={{marginLeft: '5px', display: 'inline-block'}}> Sales Bot </p>
                 </div>
               </div>
               <div style={{ display: "inline-block", marginTop: "10px" }}>
@@ -190,10 +181,31 @@ export default function ChatWithAgent() {
                 </div>
               ))}
             </div>
+
+           <Button
+            variant="contained"
+            color="primary"
+            onClick={() => navigate("/agent-configuration")}
+          >
+            Configure GitHub Access
+          </Button>
             </div>
           </div>
+          
+          {/* Collapse/Expand button */}
+          {!mainDashboard && (
+            <div 
+              className={`fixed top-1/2 ${sidebarCollapsed ? 'left-0' : 'left-[20%]'} z-10 bg-gray-200 p-2 rounded-r-md cursor-pointer shadow-md transition-all duration-500 sidebar-toggle`}
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            >
+              {sidebarCollapsed ? 
+                <ChevronRightIcon size={24} currentColor={"#6b7280"} /> : 
+                <ChevronLeftIcon size={24} currentColor={"#6b7280"} />
+              }
+            </div>
+          )}
         </div>
-        <div className={mainDashboard ? 'w-full' : 'w-4/5'}>
+        <div className={`${mainDashboard || sidebarCollapsed ? 'w-full' : 'w-4/5'} transition-all duration-500`}>
           <div
             ref={containerRef}
             style={{ height: chatScreenHeight }}
@@ -232,7 +244,7 @@ export default function ChatWithAgent() {
               </div>
             ))}
           </div>
-          <div style={{ padding: "5px" }}>
+          <div>
             <center>
               {
                 mainDashboard

@@ -58,3 +58,39 @@ export const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
     </svg>
   );
 };
+
+export const ChevronLeftIcon = ({ size = 16, currentColor = "currentcolor" }: { size?: number, currentColor?: string }) => {
+  return (
+    <svg 
+      height={size} 
+      width={size} 
+      viewBox="0 0 24 24" 
+      style={{ color: currentColor }}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M15.41 7.41L14 6L8 12L14 18L15.41 16.59L10.83 12L15.41 7.41Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+export const ChevronRightIcon = ({ size = 16, currentColor = "currentcolor" }: { size?: number, currentColor?: string }) => {
+  return (
+    <svg 
+      height={size} 
+      width={size} 
+      viewBox="0 0 24 24" 
+      style={{ color: currentColor }}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M10 6L8.59 7.41L13.17 12L8.59 16.59L10 18L16 12L10 6Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};

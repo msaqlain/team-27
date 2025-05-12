@@ -7,3 +7,10 @@ node_modules
 # add .dapr
 .dapr
 
+# add __pycache__ folders
+__pycache__/
+*.py[cod]
+*$py.class
+
+# add logs folder
+logs/

@@ -1,4 +1,19 @@
 .chat-container {
-  background-image: url('../../public/bg-app.png');
+  background-image: url('../../public/bg.jpg');
   background-size: cover;
+  position: relative;
+}
+
+.sidebar-toggle {
+  position: fixed;
+  z-index: 100;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16);
+}
+
+.sidebar-toggle:hover {
+  background-color: #e5e7eb;
 }
