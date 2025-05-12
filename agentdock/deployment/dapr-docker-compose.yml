@@ -1,0 +1,148 @@
+version: '3.8'
+
+services:
+  # Redis for Dapr components
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  # Zipkin for tracing
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      - "9411:9411"
+
+  # Dapr Placement for actor distribution
+  placement:
+    image: "daprio/dapr:latest"
+    command: ["./placement", "-port", "50006"]
+    ports:
+      - "50006:50006"
+
+  # GitHub MCP Server
+  github-mcp:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.github-mcp
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+      - placement
+
+  # GitHub MCP Dapr sidecar
+  github-mcp-dapr:
+    image: "daprio/daprd:latest"
+    command: ["./daprd",
+     "-app-id", "github-mcp",
+     "-app-port", "8001",
+     "-components-path", "/components",
+     "-placement-host-address", "placement:50006"
+    ]
+    volumes:
+      - ../components:/components
+    depends_on:
+      - github-mcp
+    network_mode: "service:github-mcp"
+
+  # Slack MCP Server
+  slack-mcp:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.slack-mcp
+    ports:
+      - "8003:8003"
+    depends_on:
+      - redis
+      - placement
+
+  # Slack MCP Dapr sidecar
+  slack-mcp-dapr:
+    image: "daprio/daprd:latest"
+    command: ["./daprd",
+     "-app-id", "slack-mcp",
+     "-app-port", "8003",
+     "-components-path", "/components",
+     "-placement-host-address", "placement:50006"
+    ]
+    volumes:
+      - ../components:/components
+    depends_on:
+      - slack-mcp
+    network_mode: "service:slack-mcp"
+
+  # Jira MCP Server
+  jira-mcp:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.jira-mcp
+    ports:
+      - "8004:8004"
+    depends_on:
+      - redis
+      - placement
+
+  # Jira MCP Dapr sidecar
+  jira-mcp-dapr:
+    image: "daprio/daprd:latest"
+    command: ["./daprd",
+     "-app-id", "jira-mcp",
+     "-app-port", "8004",
+     "-components-path", "/components",
+     "-placement-host-address", "placement:50006"
+    ]
+    volumes:
+      - ../components:/components
+    depends_on:
+      - jira-mcp
+    network_mode: "service:jira-mcp"
+
+  # Chatbot Service
+  chatbot:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.chatbot
+    ports:
+      - "8002:8002"
+    environment:
+      - GITHUB_MCP_URL=http://github-mcp:8001
+      - SLACK_MCP_URL=http://slack-mcp:8003
+      - JIRA_MCP_URL=http://jira-mcp:8004
+      - GROQ_API_KEY=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
+    depends_on:
+      - github-mcp
+      - slack-mcp
+      - jira-mcp
+      - redis
+      - placement
+
+  # Chatbot Dapr sidecar
+  chatbot-dapr:
+    image: "daprio/daprd:latest"
+    command: ["./daprd",
+     "-app-id", "chatbot",
+     "-app-port", "8002",
+     "-components-path", "/components",
+     "-placement-host-address", "placement:50006"
+    ]
+    volumes:
+      - ../components:/components
+    depends_on:
+      - chatbot
+    network_mode: "service:chatbot"
+
+  # Frontend
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - chatbot
+    environment:
+      - REACT_APP_CHATBOT_URL=http://localhost:8002
+      - REACT_APP_GITHUB_MCP_URL=http://localhost:8001
+      - REACT_APP_SLACK_MCP_URL=http://localhost:8003
+      - REACT_APP_JIRA_MCP_URL=http://localhost:8004 
