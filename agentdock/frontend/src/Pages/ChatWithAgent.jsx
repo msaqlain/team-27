@@ -18,6 +18,7 @@ export default function ChatWithAgent() {
 
   const [input, setInput] = useState("");
   const [openLoader, setOpenLoader] = useState(false);
+  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const [chatScreenHeight, setChatScreenHeight] = useState("30vh");
 
   useEffect(() => {
@@ -61,13 +62,9 @@ export default function ChatWithAgent() {
     }
   };
 
-  const conversations = {
-    // TODO: Should be fetched from API 
-    "Today": [],
-    "Yesterday": [
-      { id: 3, title: "Sample Conversation" },
-    ]
-  };
+  const conversations = [
+    { id: 3, title: "Sample Conversation" }
+  ];
 
   const [history, setHistory] = useState(conversations);
 
@@ -106,7 +103,8 @@ export default function ChatWithAgent() {
     setMessages([...currentMessages, userMessage]); // Update state
 
     setInput(""); // Clear input
-    setOpenLoader(true);
+    setOpenLoader(true); // Disable input
+    setIsWaitingForResponse(true); // Mark that we're waiting for a response
 
     setTimeout(() => {
       setScroll();
@@ -156,12 +154,15 @@ export default function ChatWithAgent() {
         }, 200);
       }
       
-
+      // Response is complete, re-enable input
       setOpenLoader(false);
+      setIsWaitingForResponse(false);
 
     } catch (error) {
       enqueueSnackbar(`Error while streaming response ${error}`);
+      // Even if there's an error, re-enable the input
       setOpenLoader(false);
+      setIsWaitingForResponse(false);
     }
   };
 
@@ -211,18 +212,15 @@ export default function ChatWithAgent() {
 
             <div className={`mt-4 pl-3 block`}>
             <div className={`mt-4 pl-3 block`}>
-              {Object.keys(conversations).map((date) => (
-                <div key={date} className="mb-4">
-                  <h3 className="text-gray-500 text-sm uppercase">{date}</h3>
-                  <ul className="mt-2">
-                    {conversations[date].map((chat) => (
-                      <li key={chat.id} className="p-2 rounded-md hover:bg-gray-200 cursor-pointer">
-                        <button onClick={() => enqueueSnackbar("Feature not implemented yet. New chat functionality is in progress.")} value={chat.id}> {chat.title} </button> 
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+              <div className="mb-4">
+                <ul className="mt-2">
+                  {conversations.map((chat) => (
+                    <li key={chat.id} className="p-2 rounded-md hover:bg-gray-200 cursor-pointer">
+                      <button onClick={() => enqueueSnackbar("Feature not implemented yet. New chat functionality is in progress.")} value={chat.id}> {chat.title} </button> 
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
 
            <Button
@@ -307,17 +305,17 @@ export default function ChatWithAgent() {
                 className="p-1 border flex flex-col items-start shadow-md mx-3 my-2 rounded-xl transition-all duration-100 focus-within:border-2 focus-within:border-black"
               >
                 <textarea
-                  className="w-full p-3 bg-gray-100 text-gray-800 rounded-full outline-none resize-none"
-                  placeholder="Send a message..."
+                  className={`w-full p-3 bg-gray-100 text-gray-800 rounded-full outline-none resize-none ${isWaitingForResponse ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  placeholder={isWaitingForResponse ? "Waiting for response..." : "Send a message..."}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  disabled={openLoader}
+                  disabled={openLoader || isWaitingForResponse}
                   onKeyDown={handleKeyDown}
                 />
                 <button
-                  className="mt-2 p-2 Sendbtn-bg text-white hover:bg-gray-500 rounded-full self-end"
+                  className={`mt-2 p-2 Sendbtn-bg text-white hover:bg-gray-500 rounded-full self-end ${(openLoader || isWaitingForResponse) ? 'opacity-60 cursor-not-allowed' : ''}`}
                   onClick={handleSend}
-                  disabled={openLoader}
+                  disabled={openLoader || isWaitingForResponse}
                 >
                   <ArrowUpIcon size={15} />
                 </button>
