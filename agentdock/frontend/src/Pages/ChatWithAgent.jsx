@@ -398,7 +398,7 @@ export default function ChatWithAgent() {
         onClose={() => setOpenJiraModal(false)} 
       />
       
-      {mainDashboard && <div className="fixed top-4 left-4 z-10 flex gap-2">
+      {mainDashboard && sidebarCollapsed && <div className="fixed top-4 left-4 z-10 flex gap-2">
         <button
           className="p-2 bg-white rounded-full shadow-md hover:shadow-lg flex items-center justify-center"
           onClick={handleToggleSettings}
@@ -411,10 +411,10 @@ export default function ChatWithAgent() {
       </div>}
       
       <div className="flex h-full" style={{ paddingLeft: "20px", paddingRight: "20px" }}>
-        <div className={mainDashboard || sidebarCollapsed ? '': 'w-1/5 pl-4'}>
+        <div className={sidebarCollapsed ? '': 'w-1/5 pl-4'}>
           <div
             className={`fixed top-0 left-0 h-full bg-gray-100 shadow-lg transform transition-transform duration-500 ${
-              !mainDashboard && !sidebarCollapsed ? "translate-x-0" : "-translate-x-full"
+              !sidebarCollapsed ? "translate-x-0" : "-translate-x-full"
             }`}
             style={{ width: "20%" }}
           >
@@ -485,7 +485,7 @@ export default function ChatWithAgent() {
           </div>
           
           {/* Collapse/Expand button */}
-          {!mainDashboard && (
+          {conversations.length > 0 && (
             <div 
               className={`fixed top-1/2 ${sidebarCollapsed ? 'left-0' : 'left-[20%]'} z-10 bg-gray-200 p-2 rounded-r-md cursor-pointer shadow-md transition-all duration-500 sidebar-toggle`}
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -501,7 +501,7 @@ export default function ChatWithAgent() {
           {!showSettings ? (
             // Chat UI
             <>
-              <div
+              {!mainDashboard ? <div
                 ref={containerRef}
                 style={{ height: chatScreenHeight }}
                 className="flex-1 overflow-auto pl-4 pr-4 pt-4 mt-5 space-y-2 transition-all duration-700"
@@ -543,7 +543,11 @@ export default function ChatWithAgent() {
                     )}
                   </div>
                 ))}
-              </div>
+              </div> : <div
+                ref={containerRef}
+                style={{ height: chatScreenHeight }}
+                className="flex-1 overflow-auto pl-4 pr-4 pt-4 mt-5 space-y-2 transition-all duration-700"
+              ></div>}
               <div>
                 <center>
                   {
