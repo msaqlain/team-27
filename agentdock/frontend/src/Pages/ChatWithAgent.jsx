@@ -312,20 +312,30 @@ export default function ChatWithAgent() {
                   disabled={openLoader || isWaitingForResponse}
                   onKeyDown={handleKeyDown}
                 />
-                <button
-                  className={`mt-2 p-2 Sendbtn-bg text-white hover:bg-gray-500 rounded-full self-end ${(openLoader || isWaitingForResponse) ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  onClick={handleSend}
-                  disabled={openLoader || isWaitingForResponse}
-                >
-                  <ArrowUpIcon size={15} />
-                </button>
-                <button
-                  className="mt-2 ml-2 p-2 bg-blue-600 text-white hover:bg-blue-700 rounded-full self-end"
-                  onClick={handleMicClick}
-                  disabled={openLoader}
-                >
-                  {isListening ? "Stop 🎙️" : "Talk 🎤"}
-                </button>
+                <div className="flex mt-2 self-end">
+                  <button
+                    className="mr-2 p-2 bg-blue-600 text-white hover:bg-blue-700 rounded-full"
+                    onClick={handleMicClick}
+                    disabled={openLoader || isWaitingForResponse}
+                  >
+                    {isListening ? "Stop 🎙️" : "Talk 🎤"}
+                  </button>
+                  <button
+                    className={`p-2 Sendbtn-bg text-white hover:bg-gray-500 rounded-full ${(openLoader || isWaitingForResponse) ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onClick={handleSend}
+                    disabled={openLoader || isWaitingForResponse}
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      textAlign: "center",
+                      display: "flex",
+                    }}
+                  >
+                    <ArrowUpIcon size={15} />
+                  </button>
+                </div>
               </div>
             </center>
           </div>
