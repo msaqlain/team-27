@@ -3,8 +3,11 @@ from fastapi import APIRouter
 api_router = APIRouter()
 
 # Import and include other routers here
-from app.api.v1.endpoints import health
+from app.api.v1.endpoints import health, workflow
+
+# Include routers
 api_router.include_router(health.router, prefix="/health", tags=["health"])
+api_router.include_router(workflow.router, prefix="/workflow", tags=["workflow"])
 
 # Example:
 # from app.api.v1.endpoints import items, users
