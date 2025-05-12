@@ -3,11 +3,6 @@ import "./App.css";
 import { SnackbarProvider } from "notistack";
 import { IconButton, Slide } from "@mui/material";
 import Router from "./routes";
-import ChatWithAgent from "./Pages/ChatWithAgent";
-import AgentConfiguration from "./Pages/AgentConfiguration";
-import { Route, Routes } from "react-router-dom";
-
-// import CloseIcon from "@mui/icons-material/Close";
 
 function App() {
   const notiStackRef = React.createRef();
