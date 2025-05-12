@@ -46,6 +46,12 @@ SLACK_MCP_BASE_URL = os.getenv("SLACK_MCP_URL", "http://localhost:8003")
 logger.info(f"GitHub MCP URL: {GITHUB_MCP_BASE_URL}")
 logger.info(f"Slack MCP URL: {SLACK_MCP_BASE_URL}")
 
+# GitHub configuration
+GITHUB_API_BASE_URL = "https://api.github.com"
+# Read GitHub token from environment variable for security
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+# If not set, you'll need to provide it through the settings UI
+
 async def check_repo_visibility(owner: str, repo: str) -> bool:
     """Check if a repository is public"""
     try:
@@ -59,37 +65,30 @@ async def check_repo_visibility(owner: str, repo: str) -> bool:
         return False
 
 async def get_github_token() -> Optional[str]:
-    """Get GitHub token from MCP server configuration"""
+    """Get GitHub token from environment or a secure place"""
+    if GITHUB_TOKEN:
+        logger.info("Using GitHub token from environment variables")
+        return GITHUB_TOKEN
+    
+    # Fallback to MCP server for backward compatibility
     try:
         logger.info(f"Attempting to fetch GitHub token from MCP server at {GITHUB_MCP_BASE_URL}/config")
-        async with httpx.AsyncClient() as client:
-            # First try to get the configuration
-            response = await client.get(f"{GITHUB_MCP_BASE_URL}/config")
-            logger.info(f"MCP server response status: {response.status_code}")
-            logger.info(f"MCP server response body: {response.text}")
-            
-            if response.status_code == 200:
-                try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            try:
+                response = await client.get(f"{GITHUB_MCP_BASE_URL}/config")
+                if response.status_code == 200:
                     config = response.json()
                     token = config.get("token")
                     if token:
                         logger.info("Successfully retrieved GitHub token from MCP server")
                         return token
-                    else:
-                        logger.error("No token found in MCP server configuration")
-                        return None
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse MCP server response as JSON: {e}")
-                    return None
-            elif response.status_code == 404:
-                logger.error("GitHub not configured. Please configure first using POST /configure")
-                return None
-            else:
-                logger.error(f"Failed to get configuration from MCP server: {response.status_code}")
-                return None
+            except Exception as e:
+                logger.error(f"Error connecting to MCP server: {str(e)}")
     except Exception as e:
-        logger.error(f"Error getting GitHub token from MCP server: {str(e)}")
-        return None
+        logger.error(f"Error getting GitHub token: {str(e)}")
+    
+    logger.warning("No GitHub token available. Some GitHub operations will be limited to public resources.")
+    return None
 
 async def get_slack_token() -> Optional[str]:
     """Get Slack token from Slack MCP server configuration"""
@@ -123,43 +122,75 @@ async def get_slack_token() -> Optional[str]:
         return None
 
 async def call_github_api(endpoint: str, method: str = "GET", data: Optional[Dict] = None, use_token: bool = True) -> Dict:
-    """Call GitHub API endpoint"""
+    """Call GitHub API endpoint directly"""
     try:
         headers = {
-            "Accept": "application/vnd.github.v3+json"
+            "Accept": "application/vnd.github.v3+json",
+            "X-GitHub-Api-Version": "2022-11-28"  # Use a stable API version
         }
         
         # Add token if using authenticated requests
         if use_token:
             token = await get_github_token()
-            if not token:
-                logger.error("No GitHub token available")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                logger.info("Added GitHub token to request headers")
+            elif endpoint.startswith("user") or "private" in endpoint:
+                # If endpoint requires authentication and no token is available
+                logger.error("No GitHub token available for authenticated endpoint")
                 raise HTTPException(
-                    status_code=400, 
-                    detail="GitHub token not configured. Please configure using the MCP server first. Make sure to call POST http://localhost:8001/configure with your token."
+                    status_code=401, 
+                    detail="GitHub token not configured. Authentication required for this operation."
                 )
-            headers["Authorization"] = f"token {token}"
-            logger.info("Added GitHub token to request headers")
         
-        async with httpx.AsyncClient() as client:
-            url = f"https://api.github.com/{endpoint}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            url = f"{GITHUB_API_BASE_URL}/{endpoint}"
             logger.info(f"Calling GitHub API endpoint: {url}")
             
-            if method == "GET":
-                response = await client.get(url, headers=headers)
-            elif method == "POST":
-                response = await client.post(url, headers=headers, json=data)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
+            try:
+                if method == "GET":
+                    response = await client.get(url, headers=headers)
+                elif method == "POST":
+                    response = await client.post(url, headers=headers, json=data)
+                elif method == "PUT":
+                    response = await client.put(url, headers=headers, json=data)
+                elif method == "PATCH":
+                    response = await client.patch(url, headers=headers, json=data)
+                elif method == "DELETE":
+                    response = await client.delete(url, headers=headers)
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
+                
+                # GitHub API returns 200-204 for success depending on the endpoint
+                if response.status_code >= 200 and response.status_code < 300:
+                    if response.status_code == 204:  # No content
+                        return {"status": "success", "message": "Operation completed successfully"}
+                    
+                    # Some endpoints may return empty response
+                    if not response.text:
+                        return {"status": "success", "message": "Operation completed successfully"}
+                    
+                    return response.json()
+                else:
+                    error_message = f"GitHub API error: {response.status_code}"
+                    try:
+                        error_data = response.json()
+                        if "message" in error_data:
+                            error_message += f" - {error_data['message']}"
+                    except Exception:
+                        error_message += f" - {response.text}"
+                    
+                    logger.error(error_message)
+                    raise HTTPException(status_code=response.status_code, detail=error_message)
             
-            if response.status_code != 200:
-                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=response.status_code, detail=f"GitHub API error: {response.text}")
-            
-            return response.json()
+            except httpx.ReadTimeout:
+                logger.error("GitHub API request timed out")
+                raise HTTPException(status_code=504, detail="GitHub API request timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error calling GitHub API: {str(e)}")
-        raise
+        raise HTTPException(status_code=500, detail=f"Error calling GitHub API: {str(e)}")
 
 async def call_slack_api(endpoint: str, method: str = "GET", data: Optional[Dict] = None) -> Dict:
     """Call Slack API endpoint"""
@@ -275,7 +306,7 @@ class CreatePRRequest(BaseModel):
     head: str
     base: str = "main"
 
-async def handle_github_request(params: Dict) -> Dict:
+async def handle_github_request(params: Dict, github_mcp_url: str) -> Dict:
     """Handle GitHub-related requests"""
     action = params.get("github_action")
     owner = params.get("owner")
@@ -295,7 +326,7 @@ async def handle_github_request(params: Dict) -> Dict:
                 print("Attempting to fetch repositories...")
                 
                 # Make the GET request
-                response = await client.get(f"{GITHUB_MCP_BASE_URL}/repos")
+                response = await client.get(f"{github_mcp_url}/repos")
                 
                 # Check if the response was successful
                 response.raise_for_status()
@@ -374,7 +405,7 @@ async def handle_github_request(params: Dict) -> Dict:
         # result = await call_github_api(f"repos/{owner}/{repo}/pulls", use_token=not is_public)
         async with httpx.AsyncClient() as client:
             # First try to get the configuration
-            response = await client.get(f"{GITHUB_MCP_BASE_URL}/{owner}/{repo}/prs")
+            response = await client.get(f"{github_mcp_url}/{owner}/{repo}/prs")
             response.raise_for_status()
             result = response.json()
             if not result:
@@ -400,7 +431,7 @@ async def handle_github_request(params: Dict) -> Dict:
         # result = await call_github_api(f"repos/{owner}/{repo}/pulls/{pr_number}", use_token=not is_public)
         async with httpx.AsyncClient() as client:
             # First try to get the configuration
-            response = await client.get(f"{GITHUB_MCP_BASE_URL}/{owner}{repo}/prs/{pr_number}/summary")
+            response = await client.get(f"{github_mcp_url}/{owner}{repo}/prs/{pr_number}/summary")
             response.raise_for_status()
             result = response.json()
         
@@ -423,7 +454,7 @@ async def handle_github_request(params: Dict) -> Dict:
     elif action == "get_stats":
         async with httpx.AsyncClient() as client:
             # First try to get the configuration
-            response = await client.get(f"{GITHUB_MCP_BASE_URL}/{owner}/{repo}/stats")
+            response = await client.get(f"{github_mcp_url}/{owner}/{repo}/stats")
             response.raise_for_status()
             result = response.json()
         
@@ -455,7 +486,7 @@ async def handle_github_request(params: Dict) -> Dict:
                 head=pr_head,
                 base=pr_base
             )
-            result = await client.post(f"{GITHUB_MCP_BASE_URL}/{owner}/{repo}/pr/create",
+            result = await client.post(f"{github_mcp_url}/{owner}/{repo}/pr/create",
                 json=body.dict())
         
         return {
@@ -469,7 +500,7 @@ async def handle_github_request(params: Dict) -> Dict:
             "action_taken": None
         }
 
-async def handle_slack_request(params: Dict) -> Dict:
+async def handle_slack_request(params: Dict, slack_mcp_url: str) -> Dict:
     """Handle Slack-related requests"""
     action = params.get("slack_action")
     channel = params.get("channel")
@@ -597,7 +628,7 @@ async def handle_slack_request(params: Dict) -> Dict:
             "action_taken": None
         }
 
-async def handle_cross_platform_action(github_result: Dict, slack_params: Dict) -> Dict:
+async def handle_cross_platform_action(github_result: Dict, slack_params: Dict, slack_mcp_url: str) -> Dict:
     """Handle actions that involve both GitHub and Slack"""
     try:
         # Check if we have raw GitHub data to send to Slack
@@ -676,6 +707,14 @@ async def chat(message: ChatMessage):
     try:
         logger.info(f"Received chat message: {message.message}")
         
+        # Get MCP URLs from context if provided
+        context = message.context or {}
+        github_mcp_url = context.get("github_mcp_url", GITHUB_MCP_BASE_URL)
+        slack_mcp_url = context.get("slack_mcp_url", SLACK_MCP_BASE_URL)
+        
+        logger.info(f"Using GitHub MCP URL: {github_mcp_url}")
+        logger.info(f"Using Slack MCP URL: {slack_mcp_url}")
+        
         # Determine intent (GitHub, Slack, or both)
         intent = determine_intent(message.message)
         platform = intent.get("platform", "conversation")
@@ -695,7 +734,7 @@ async def chat(message: ChatMessage):
         
         # Handle GitHub-only requests
         elif platform == "github":
-            result = await handle_github_request(intent)
+            result = await handle_github_request(intent, github_mcp_url)
             return ChatResponse(
                 response=result["response"],
                 action_taken=result["action_taken"]
@@ -703,7 +742,7 @@ async def chat(message: ChatMessage):
         
         # Handle Slack-only requests
         elif platform == "slack":
-            result = await handle_slack_request(intent)
+            result = await handle_slack_request(intent, slack_mcp_url)
             return ChatResponse(
                 response=result["response"],
                 action_taken=result["action_taken"]
@@ -712,19 +751,19 @@ async def chat(message: ChatMessage):
         # Handle cross-platform requests (both GitHub and Slack)
         elif platform == "both":
             # First handle the GitHub part
-            github_result = await handle_github_request(intent)
+            github_result = await handle_github_request(intent, github_mcp_url)
             
             # Then handle the Slack part
             if "slack_action" in intent and intent["slack_action"] == "send_message":
                 # If the intent is to send GitHub data to Slack
-                cross_platform_result = await handle_cross_platform_action(github_result, intent)
+                cross_platform_result = await handle_cross_platform_action(github_result, intent, slack_mcp_url)
                 return ChatResponse(
                     response=cross_platform_result["response"],
                     action_taken=cross_platform_result["action_taken"]
                 )
             else:
                 # Handle each part separately and combine the results
-                slack_result = await handle_slack_request(intent)
+                slack_result = await handle_slack_request(intent, slack_mcp_url)
                 combined_response = f"{github_result['response']}\n\n{slack_result['response']}"
                 return ChatResponse(
                     response=combined_response,

@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
-import { Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button } from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button, Alert } from '@mui/material';
 import { useSnackbar } from 'notistack';
 import axios from 'axios';
+import config from '../config';
+
+// LocalStorage keys
+const JIRA_TOKEN_KEY = 'jira_token';
+const JIRA_MCP_URL_KEY = 'jira_mcp_url';
+const JIRA_CONFIG_STATUS_KEY = 'jira_config_status';
 
 /**
  * A reusable modal component for Jira token configuration
@@ -12,52 +18,110 @@ import axios from 'axios';
  * @returns {JSX.Element} The JiraTokenModal component
  */
 const JiraTokenModal = ({ open, onClose }) => {
-  const [jiraApiToken, setJiraApiToken] = useState('');
+  const [jiraToken, setJiraToken] = useState('');
   const [jiraEmail, setJiraEmail] = useState('');
-  const [jiraDomain, setJiraDomain] = useState('');
+  const [jiraUrl, setJiraUrl] = useState('');
+  const [mcpServerUrl, setMcpServerUrl] = useState('http://localhost:8004');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [configStatus, setConfigStatus] = useState('');
   const { enqueueSnackbar } = useSnackbar();
 
+  useEffect(() => {
+    // Load saved values from localStorage when modal opens
+    if (open) {
+      const savedConfig = localStorage.getItem(JIRA_TOKEN_KEY) ? JSON.parse(localStorage.getItem(JIRA_TOKEN_KEY)) : {};
+      const savedMcpUrl = localStorage.getItem(JIRA_MCP_URL_KEY) || 'http://localhost:8004';
+      const savedStatus = localStorage.getItem(JIRA_CONFIG_STATUS_KEY) || '';
+      
+      setJiraToken(savedConfig.token || '');
+      setJiraEmail(savedConfig.email || '');
+      setJiraUrl(savedConfig.url || '');
+      setMcpServerUrl(savedMcpUrl);
+      setConfigStatus(savedStatus);
+    }
+  }, [open]);
+
   const handleSubmit = async () => {
-    if (!jiraApiToken.trim() || !jiraEmail.trim() || !jiraDomain.trim()) {
-      enqueueSnackbar('Please fill in all Jira fields', { variant: 'error' });
+    if (!jiraToken.trim()) {
+      enqueueSnackbar('Please enter a Jira API token', { variant: 'error' });
       return;
     }
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(jiraEmail)) {
-      enqueueSnackbar('Please enter a valid email address', { variant: 'error' });
+    if (!jiraEmail.trim()) {
+      enqueueSnackbar('Please enter your Jira email', { variant: 'error' });
+      return;
+    }
+
+    if (!jiraUrl.trim()) {
+      enqueueSnackbar('Please enter your Jira instance URL', { variant: 'error' });
+      return;
+    }
+
+    if (!mcpServerUrl.trim()) {
+      enqueueSnackbar('Please enter an MCP Server URL', { variant: 'error' });
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await axios.post('http://localhost:8001/configure/jira', { 
-        token: jiraApiToken,
+      // Save values to localStorage
+      const jiraConfig = {
+        token: jiraToken,
         email: jiraEmail,
-        domain: jiraDomain
-      });
-      enqueueSnackbar('Jira configuration successful', { variant: 'success' });
-      resetForm();
+        url: jiraUrl
+      };
+      localStorage.setItem(JIRA_TOKEN_KEY, JSON.stringify(jiraConfig));
+      localStorage.setItem(JIRA_MCP_URL_KEY, mcpServerUrl);
+      
+      // Update the config with the new MCP URL
+      config.updateJiraMcpUrl();
+      
+      // Call the MCP server API (if available)
+      try {
+        await axios.post(`${mcpServerUrl}/configure`, { 
+          token: jiraToken,
+          email: jiraEmail,
+          url: jiraUrl
+        });
+        
+        // Update status in localStorage
+        const timestamp = new Date().toLocaleString();
+        const status = `Configured successfully at ${timestamp}`;
+        localStorage.setItem(JIRA_CONFIG_STATUS_KEY, status);
+        setConfigStatus(status);
+        
+        enqueueSnackbar('Jira configuration saved successfully', { variant: 'success' });
+      } catch (error) {
+        // Even if the MCP server fails, we still saved to localStorage
+        console.error('Error configuring Jira with MCP server:', error);
+        
+        // Update status with warning
+        const timestamp = new Date().toLocaleString();
+        const status = `Configuration saved locally at ${timestamp}, but MCP server error: ${error.message}`;
+        localStorage.setItem(JIRA_CONFIG_STATUS_KEY, status);
+        setConfigStatus(status);
+        
+        enqueueSnackbar('Jira configuration saved locally, but MCP server not reachable', { variant: 'warning' });
+      }
+      
       onClose();
     } catch (error) {
-      console.error('Error configuring Jira:', error);
-      enqueueSnackbar('Failed to configure Jira', { variant: 'error' });
+      console.error('Error saving Jira configuration:', error);
+      
+      // Update status with error
+      const timestamp = new Date().toLocaleString();
+      const status = `Configuration failed at ${timestamp}: ${error.message}`;
+      localStorage.setItem(JIRA_CONFIG_STATUS_KEY, status);
+      setConfigStatus(status);
+      
+      enqueueSnackbar('Failed to save Jira configuration', { variant: 'error' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const resetForm = () => {
-    setJiraApiToken('');
-    setJiraEmail('');
-    setJiraDomain('');
-  };
-
   const handleClose = () => {
     if (!isSubmitting) {
-      resetForm();
       onClose();
     }
   };
@@ -66,8 +130,45 @@ const JiraTokenModal = ({ open, onClose }) => {
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle>Configure Jira Access</DialogTitle>
       <DialogContent>
+        {configStatus && (
+          <Alert 
+            severity={configStatus.includes('failed') ? 'error' : configStatus.includes('warning') ? 'warning' : 'success'} 
+            className="mb-4"
+            sx={{ marginBottom: 2, marginTop: 1 }}
+          >
+            {configStatus}
+          </Alert>
+        )}
+        
         <TextField
-          autoFocus
+          margin="dense"
+          label="MCP Server URL"
+          type="text"
+          fullWidth
+          variant="outlined"
+          value={mcpServerUrl}
+          onChange={(e) => setMcpServerUrl(e.target.value)}
+          disabled={isSubmitting}
+          placeholder="Enter MCP Server URL"
+          helperText="URL of the Jira MCP Server (if available)"
+          sx={{ marginBottom: 2 }}
+        />
+        
+        <TextField
+          margin="dense"
+          label="Jira Instance URL"
+          type="text"
+          fullWidth
+          variant="outlined"
+          value={jiraUrl}
+          onChange={(e) => setJiraUrl(e.target.value)}
+          disabled={isSubmitting}
+          placeholder="https://your-domain.atlassian.net"
+          helperText="Your Jira instance URL"
+          sx={{ marginBottom: 2 }}
+        />
+        
+        <TextField
           margin="dense"
           label="Jira Email"
           type="email"
@@ -76,30 +177,22 @@ const JiraTokenModal = ({ open, onClose }) => {
           value={jiraEmail}
           onChange={(e) => setJiraEmail(e.target.value)}
           disabled={isSubmitting}
-          placeholder="Enter your Jira email address"
+          placeholder="Enter your Jira email"
+          helperText="The email associated with your Jira account"
+          sx={{ marginBottom: 2 }}
         />
+        
         <TextField
           margin="dense"
           label="Jira API Token"
           type="password"
           fullWidth
           variant="outlined"
-          value={jiraApiToken}
-          onChange={(e) => setJiraApiToken(e.target.value)}
+          value={jiraToken}
+          onChange={(e) => setJiraToken(e.target.value)}
           disabled={isSubmitting}
           placeholder="Enter your Jira API token"
-        />
-        <TextField
-          margin="dense"
-          label="Jira Domain"
-          type="text"
-          fullWidth
-          variant="outlined"
-          value={jiraDomain}
-          onChange={(e) => setJiraDomain(e.target.value)}
-          disabled={isSubmitting}
-          placeholder="e.g., your-company.atlassian.net"
-          helperText="This information will be used to access your Jira projects and issues"
+          helperText="Generate this token from your Atlassian account settings"
         />
       </DialogContent>
       <DialogActions>

@@ -9,11 +9,19 @@ import config from '../../config.js'
  */
 export async function* DoChat(message, chatHistory = []) {
   try {
+    // Get MCP server URLs from config/localStorage
+    const githubMcpUrl = config.GITHUB_MCP_URL;
+    const slackMcpUrl = config.SLACK_MCP_URL;
+    const jiraMcpUrl = config.JIRA_MCP_URL;
+    
     // Prepare the request payload
     const payload = {
       message: message,
       context: {
-        chat_history: chatHistory
+        chat_history: chatHistory,
+        github_mcp_url: githubMcpUrl,
+        slack_mcp_url: slackMcpUrl,
+        jira_mcp_url: jiraMcpUrl
       }
     };
 

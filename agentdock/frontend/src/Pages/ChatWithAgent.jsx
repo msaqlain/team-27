@@ -10,9 +10,6 @@ import {
   TrashIcon} from "../components/icons.tsx";
 import { DoChat } from "../DAL/Chat/chat.js";
 import { CHAT_WITH_AGENT_SCREEN_HEIGHT } from "../constants/AppConstants.js";
-import GitHubTokenModal from "../components/GitHubTokenModal";
-import SlackTokenModal from "../components/SlackTokenModal";
-import JiraTokenModal from "../components/JiraTokenModal";
 import SettingsPanel from "../components/SettingsPanel";
 
 import './ChatWithAgent.css'
@@ -25,11 +22,6 @@ export default function ChatWithAgent() {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
   const [activeThreadId, setActiveThreadId] = useState(null);
-
-  // Integration configuration modals
-  const [openGithubModal, setOpenGithubModal] = useState(false);
-  const [openSlackModal, setOpenSlackModal] = useState(false);
-  const [openJiraModal, setOpenJiraModal] = useState(false);
   
   // Settings state
   const [showSettings, setShowSettings] = useState(false);
@@ -372,9 +364,9 @@ export default function ChatWithAgent() {
   // Toggle settings view
   const handleToggleSettings = () => {
     setShowSettings(prev => !prev);
-    if (sidebarCollapsed) {
-      setSidebarCollapsed(false);
-    }
+    // if (sidebarCollapsed) {
+    //   setSidebarCollapsed(false);
+    // }
   };
 
   // Go back to chat
@@ -384,20 +376,6 @@ export default function ChatWithAgent() {
 
   return (
     <div className="flex flex-col h-screen bg-white-100 chat-container">
-      {/* Configuration Modals */}
-      <GitHubTokenModal 
-        open={openGithubModal} 
-        onClose={() => setOpenGithubModal(false)} 
-      />
-      <SlackTokenModal 
-        open={openSlackModal} 
-        onClose={() => setOpenSlackModal(false)} 
-      />
-      <JiraTokenModal 
-        open={openJiraModal} 
-        onClose={() => setOpenJiraModal(false)} 
-      />
-      
       {mainDashboard && sidebarCollapsed && <div className="fixed top-4 left-4 z-10 flex gap-2">
         <button
           className="p-2 bg-white rounded-full shadow-md hover:shadow-lg flex items-center justify-center"
@@ -607,9 +585,6 @@ export default function ChatWithAgent() {
             // Settings Panel
             <SettingsPanel
               onBackToChat={handleBackToChat}
-              onOpenGithubModal={() => setOpenGithubModal(true)}
-              onOpenSlackModal={() => setOpenSlackModal(true)}
-              onOpenJiraModal={() => setOpenJiraModal(true)}
             />
           )}
         </div>
