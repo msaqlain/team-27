@@ -13,10 +13,53 @@ export default function ChatWithAgent() {
   const { enqueueSnackbar } = useSnackbar();
   const [mainDashboard, setMainDashboard] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
 
   const [input, setInput] = useState("");
   const [openLoader, setOpenLoader] = useState(false);
   const [chatScreenHeight, setChatScreenHeight] = useState("30vh");
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = false;
+      recognition.continuous = false;
+  
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
+        setIsListening(false);
+        // Optional: send automatically
+        // handleSend();
+      };
+  
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        setIsListening(false);
+      };
+  
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+  
+      recognitionRef.current = recognition;
+    }
+  }, []);
+
+  const handleMicClick = () => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      setInput(""); // clear previous input
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  };
 
   const conversations = {
     // TODO: Should be fetched from API 
@@ -277,6 +320,13 @@ export default function ChatWithAgent() {
                   disabled={openLoader}
                 >
                   <ArrowUpIcon size={15} />
+                </button>
+                <button
+                  className="mt-2 ml-2 p-2 bg-blue-600 text-white hover:bg-blue-700 rounded-full self-end"
+                  onClick={handleMicClick}
+                  disabled={openLoader}
+                >
+                  {isListening ? "Stop 🎙️" : "Talk 🎤"}
                 </button>
               </div>
             </center>
