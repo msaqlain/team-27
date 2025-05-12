@@ -1,19 +1,46 @@
 import { useState } from "react";
-import { Button, TextField, Typography, Snackbar, Alert, Box } from "@mui/material";
+import {
+  Button,
+  TextField,
+  Typography,
+  Snackbar,
+  Alert,
+  Box,
+  Divider,
+} from "@mui/material";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 
 const AgentConfiguration = () => {
-  const [token, setToken] = useState("");
+  const navigate = useNavigate()
+  const [githubToken, setGithubToken] = useState("");
+  const [slackToken, setSlackToken] = useState("");
   const [open, setOpen] = useState(false);
   const [success, setSuccess] = useState(true);
+  const [message, setMessage] = useState("");
 
-  const handleSubmit = async () => {
+  const handleGithubSubmit = async () => {
     try {
-      await axios.post("http://localhost:8001/configure", { token });
+      await axios.post("http://localhost:8001/configure", { token: githubToken });
       setSuccess(true);
-      setOpen(true);
+      setMessage("GitHub token configured successfully");
     } catch (error) {
       setSuccess(false);
+      setMessage("Failed to configure GitHub token");
+    } finally {
+      setOpen(true);
+    }
+  };
+
+  const handleSlackSubmit = async () => {
+    try {
+      await axios.post("http://localhost:8003/configure", { token: slackToken });
+      setSuccess(true);
+      setMessage("Slack token configured successfully");
+    } catch (error) {
+      setSuccess(false);
+      setMessage("Failed to configure Slack token");
+    } finally {
       setOpen(true);
     }
   };
@@ -24,6 +51,15 @@ const AgentConfiguration = () => {
 
   return (
     <Box sx={{ padding: 3 }}>
+      <Button
+        variant="contained"
+        color="primary"
+        sx={{ position: "absolute", top: 16, right: 16 }}
+        onClick={() => navigate("/")}
+      >
+        Chatbot
+      </Button>
+      {/* GitHub Token Configuration */}
       <Typography variant="h5" gutterBottom>
         Configure GitHub Access
       </Typography>
@@ -32,18 +68,39 @@ const AgentConfiguration = () => {
         type="password"
         variant="outlined"
         fullWidth
-        value={token}
-        onChange={(e) => setToken(e.target.value)}
+        value={githubToken}
+        onChange={(e) => setGithubToken(e.target.value)}
         sx={{ maxWidth: 400, marginBottom: 2 }}
       />
       <br />
-      <Button variant="contained" color="primary" onClick={handleSubmit}>
-        Submit
+      <Button variant="contained" color="primary" onClick={handleGithubSubmit}>
+        Submit GitHub Token
       </Button>
 
+      <Divider sx={{ my: 4 }} />
+
+      {/* Slack Token Configuration */}
+      <Typography variant="h5" gutterBottom>
+        Configure Slack Access
+      </Typography>
+      <TextField
+        label="Slack Token"
+        type="password"
+        variant="outlined"
+        fullWidth
+        value={slackToken}
+        onChange={(e) => setSlackToken(e.target.value)}
+        sx={{ maxWidth: 400, marginBottom: 2 }}
+      />
+      <br />
+      <Button variant="contained" color="primary" onClick={handleSlackSubmit}>
+        Submit Slack Token
+      </Button>
+
+      {/* Shared Snackbar for Feedback */}
       <Snackbar open={open} autoHideDuration={3000} onClose={handleClose}>
         <Alert severity={success ? "success" : "error"} onClose={handleClose} sx={{ width: "100%" }}>
-          {success ? "GitHub token configured successfully" : "Failed to configure GitHub token"}
+          {message}
         </Alert>
       </Snackbar>
     </Box>

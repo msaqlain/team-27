@@ -34,12 +34,7 @@ function App() {
       >
         <div style={{ display: 'flex' }}>
           <div style={{ marginLeft: '0px', width: '100%', marginRight: '0px', marginTop: '0px' }}>
-          <Router>
-            <Routes>
-              <Route path="/" element={<ChatWithAgent />} />
-              <Route path="/agent-configuration" element={<AgentConfiguration />} />
-            </Routes>
-          </Router>
+          <Router />
           </div>
         </div>
       </SnackbarProvider>
