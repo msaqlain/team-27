@@ -8,6 +8,9 @@ from datetime import datetime
 import json
 import logging
 from groq import Groq
+# Import Jira-related libraries
+from jira import JIRA
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +34,13 @@ if not groq_api_key:
 
 logger.info("Initializing Groq client...")
 client = Groq(api_key=groq_api_key)
+
+# Jira Configuration
+JIRA_SERVER = os.getenv('JIRA_SERVER', 'https://folio3.atlassian.net/')
+JIRA_EMAIL = os.getenv('JIRA_EMAIL', 'zainkamboh@folio3.com')
+JIRA_API_TOKEN = os.getenv('JIRA_API_TOKEN', 'ATATT3xFfGF08s-O3iBpUIVIsM9NQz5APX9BDuKAZap-sKbUHAo4PWjt4WoMEryxR4PftoX9IXKWRBOHRqhXx-f9nKZk5KtHesj3-cRc9nV8TdvB3qLO6na3SaVbaCj1O4rYpK_K5pLQ9HZDp5aLyDs1y3vCnL8ByAUE_7vyDvYcnuXwCIp4F-0=1E4B6442')
+JIRA_PROJECT_KEY = os.getenv('JIRA_PROJECT_KEY', 'CAT')
+
 
 class ChatMessage(BaseModel):
     message: str
@@ -121,6 +131,255 @@ async def get_slack_token() -> Optional[str]:
     except Exception as e:
         logger.error(f"Error getting Slack token from MCP server: {str(e)}")
         return None
+
+# New Jira-related functions
+def get_jira_client():
+    """Initialize and return Jira client"""
+    try:
+        jira = JIRA(
+            server=JIRA_SERVER,
+            basic_auth=(JIRA_EMAIL, JIRA_API_TOKEN)
+        )
+        return jira
+    except Exception as e:
+        logger.error(f"Error connecting to Jira: {e}")
+        return None
+
+def create_jira_ticket(summary, description="", issue_type="Bug"):
+    """Create a new Jira ticket"""
+    jira = get_jira_client()
+    if not jira:
+        return {"success": False, "message": "Failed to connect to Jira"}
+    
+    try:
+        issue_dict = {
+            'project': {'key': JIRA_PROJECT_KEY},
+            'summary': summary,
+            'description': description,
+            'issuetype': {'name': issue_type},
+        }
+        new_issue = jira.create_issue(fields=issue_dict)
+        return {
+            "success": True,
+            "message": f"Created ticket: {new_issue.key} - {summary}",
+            "ticket_key": new_issue.key
+        }
+    except Exception as e:
+        return {"success": False, "message": f"Error creating ticket: {e}"}
+
+def update_jira_ticket_status(ticket_key, new_status):
+    """Update Jira ticket status"""
+    jira = get_jira_client()
+    if not jira:
+        return {"success": False, "message": "Failed to connect to Jira"}
+    
+    try:
+        issue = jira.issue(ticket_key)
+        transitions = jira.transitions(issue)
+        
+        # Find the transition ID for the requested status
+        transition_id = None
+        for t in transitions:
+            if t['name'].lower() == new_status.lower():
+                transition_id = t['id']
+                break
+        
+        if transition_id:
+            jira.transition_issue(issue, transition_id)
+            return {
+                "success": True,
+                "message": f"Updated ticket {ticket_key} status to {new_status}"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Status '{new_status}' not found in available transitions"
+            }
+    except Exception as e:
+        return {"success": False, "message": f"Error updating ticket status: {e}"}
+
+def get_jira_ticket_details(ticket_key):
+    """Retrieve Jira ticket details"""
+    jira = get_jira_client()
+    if not jira:
+        return {"success": False, "message": "Failed to connect to Jira"}
+    
+    try:
+        issue = jira.issue(ticket_key)
+        return {
+            "success": True,
+            "details": {
+                'key': issue.key,
+                'summary': issue.fields.summary,
+                'status': issue.fields.status.name,
+                'assignee': issue.fields.assignee.displayName if issue.fields.assignee else "Unassigned",
+                'description': issue.fields.description or "No description"
+            }
+        }
+    except Exception as e:
+        return {"success": False, "message": f"Error getting ticket details: {e}"}
+
+def analyze_jira_intent(message: str):
+    """Analyze the intent for Jira-related actions"""
+    try:
+        prompt = f"""
+        Analyze the following message and determine the Jira-related intent:
+        "{message}"
+
+        Return a JSON object with the following structure:
+        1. "action": One of ["create_ticket", "update_status", "get_details", "unknown"]
+        2. If action is "create_ticket":
+           - "summary": Ticket summary
+           - "description": Optional ticket description
+           - "issue_type": Type of issue (default: "Task")
+        3. If action is "update_status":
+           - "ticket_key": Jira ticket key
+           - "new_status": New status for the ticket
+        4. If action is "get_details":
+           - "ticket_key": Jira ticket key
+
+        Use context clues and explicit mentions to determine the intent.
+        """
+        
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": "You are a Jira intent classifier. Always return valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=300,
+            response_format={"type": "json_object"}
+        )
+        
+        response_content = completion.choices[0].message.content.strip()
+        return json.loads(response_content)
+    
+    except Exception as e:
+        logger.error(f"Error analyzing Jira intent: {e}")
+        # Fallback to regex-based analysis
+        return basic_jira_intent_analysis(message)
+
+def basic_jira_intent_analysis(message):
+    """Fallback regex-based Jira intent analysis"""
+    message = message.lower()
+    
+    # Create ticket pattern
+    create_match = re.search(r'create (?:a )?(?:new )?ticket (?:called |titled |named )?["\'](.*?)["\']', message)
+    if create_match:
+        return {
+            "action": "create_ticket",
+            "summary": create_match.group(1),
+            "issue_type": "Bug" if "bug" in message else "Task"
+        }
+    
+    # Update status pattern
+    update_match = re.search(r'change (?:the )?status of (?:ticket |issue )?([A-Z]+-\d+) to ["\'](.*?)["\']', message)
+    if update_match:
+        return {
+            "action": "update_status",
+            "ticket_key": update_match.group(1),
+            "new_status": update_match.group(2)
+        }
+    
+    # Get ticket details pattern
+    details_match = re.search(r'(?:get |show |display )(?:the )?details (?:for |of )(?:ticket |issue )?([A-Z]+-\d+)', message)
+    if details_match:
+        return {
+            "action": "get_details",
+            "ticket_key": details_match.group(1)
+        }
+    
+    return {"action": "unknown"}
+
+async def handle_jira_request(params: Dict) -> Dict:
+    """Handle Jira-related requests"""
+    action = params.get("action")
+    
+    if action == "create_ticket":
+        summary = params.get("summary", "New Ticket")
+        description = params.get("description", "")
+        issue_type = params.get("issue_type", "Task")
+        
+        result = create_jira_ticket(summary, description, issue_type)
+        
+        if result["success"]:
+            return {
+                "response": result["message"],
+                "action_taken": {
+                    "action": "create_ticket",
+                    "ticket_key": result.get("ticket_key"),
+                    "details": {
+                        "summary": summary,
+                        "description": description,
+                        "issue_type": issue_type
+                    }
+                }
+            }
+        else:
+            return {
+                "response": result["message"],
+                "action_taken": None
+            }
+    
+    elif action == "update_status":
+        ticket_key = params.get("ticket_key")
+        new_status = params.get("new_status")
+        
+        if not ticket_key or not new_status:
+            return {
+                "response": "Please provide both the ticket key and the new status",
+                "action_taken": None
+            }
+        
+        result = update_jira_ticket_status(ticket_key, new_status)
+        
+        return {
+            "response": result["message"],
+            "action_taken": {
+                "action": "update_status",
+                "ticket_key": ticket_key,
+                "new_status": new_status
+            } if result["success"] else None
+        }
+    
+    elif action == "get_details":
+        ticket_key = params.get("ticket_key")
+        
+        if not ticket_key:
+            return {
+                "response": "Please provide the ticket key",
+                "action_taken": None
+            }
+        
+        result = get_jira_ticket_details(ticket_key)
+        
+        if result["success"]:
+            return {
+                "response": (
+                    f"Ticket Details for {ticket_key}:\n"
+                    f"Summary: {result['details']['summary']}\n"
+                    f"Status: {result['details']['status']}\n"
+                    f"Assignee: {result['details']['assignee']}\n"
+                    f"Description: {result['details']['description']}"
+                ),
+                "action_taken": {
+                    "action": "get_details",
+                    "ticket_key": ticket_key,
+                    "details": result['details']
+                }
+            }
+        else:
+            return {
+                "response": result["message"],
+                "action_taken": None
+            }
+    
+    else:
+        return {
+            "response": "I couldn't understand the Jira-related request. Try creating a ticket, updating a ticket status, or getting ticket details.",
+            "action_taken": None
+        }
 
 async def call_github_api(endpoint: str, method: str = "GET", data: Optional[Dict] = None, use_token: bool = True) -> Dict:
     """Call GitHub API endpoint"""
@@ -628,24 +887,34 @@ async def handle_cross_platform_action(github_result: Dict, slack_params: Dict) 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(message: ChatMessage):
-    """Process natural language message and interact with GitHub and/or Slack"""
+     """Process natural language message and interact with GitHub, Slack, and Jira"""
     try:
         logger.info(f"Received chat message: {message.message}")
         
         # Determine intent (GitHub, Slack, or both)
-        intent = determine_intent(message.message)
+       intent = determine_intent(message.message)
         platform = intent.get("platform", "conversation")
         
         logger.info(f"Determined platform: {platform}")
         
-        # Handle general conversation
+          # Handle general conversation
         if platform == "conversation":
+            # Check if there's a Jira-specific intent
+            jira_intent = analyze_jira_intent(message.message)
+            
+            if jira_intent["action"] != "unknown":
+                jira_result = await handle_jira_request(jira_intent)
+                return ChatResponse(
+                    response=jira_result["response"],
+                    action_taken=jira_result["action_taken"]
+                )
+            
             return ChatResponse(
-                response="Hello! I'm your assistant. I can help you with:\n"
-                        "• GitHub: View repositories, check pull requests, get repository statistics\n"
-                        "• Slack: List channels, send messages, get conversation history\n"
-                        "• Cross-platform: Send GitHub information to Slack channels\n\n"
-                        "Just let me know what you'd like to do!",
+                response="Hello! I can help you with:\n"
+                        "• GitHub: View repositories, check pull requests\n"
+                        "• Slack: List channels, send messages\n"
+                        "• Jira: Create tickets, update status, get details\n\n"
+                        "What would you like to do?",
                 action_taken={"action": "conversation"}
             )
         
@@ -664,7 +933,15 @@ async def chat(message: ChatMessage):
                 response=result["response"],
                 action_taken=result["action_taken"]
             )
-        
+                elif platform == "jira":
+            # Use the new handle_jira_request function
+            jira_intent = analyze_jira_intent(message.message)
+            result = await handle_jira_request(jira_intent)
+            return ChatResponse(
+                response=result["response"],
+                action_taken=result["action_taken"]
+            )
+
         # Handle cross-platform requests (both GitHub and Slack)
         elif platform == "both":
             # First handle the GitHub part
