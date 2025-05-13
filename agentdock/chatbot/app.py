@@ -454,7 +454,7 @@ async def handle_github_request(params: Dict, github_mcp_url: str) -> Dict:
         # result = await call_github_api(f"repos/{owner}/{repo}/pulls/{pr_number}", use_token=not is_public)
         async with httpx.AsyncClient() as client:
             # First try to get the configuration
-            response = await client.get(f"{github_mcp_url}/{owner}{repo}/prs/{pr_number}/summary")
+            response = await client.get(f"{github_mcp_url}/{owner}/{repo}/pr/{pr_number}/summary")
             response.raise_for_status()
             result = response.json()
         
